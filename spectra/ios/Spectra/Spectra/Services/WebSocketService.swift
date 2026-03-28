@@ -223,7 +223,8 @@ final class WebSocketService: ObservableObject {
                let status = try? JSONDecoder().decode(TaskStatus.self, from: data) {
                 latestStatus = status
                 statusHistory.append(status)
-                NotificationService.shared.postProgress(step: status.step, total: status.total, detail: status.detail)
+                // Don't post progress notifications — they cover the screen and interfere with WDA
+                // NotificationService.shared.postProgress(step: status.step, total: status.total, detail: status.detail)
             }
 
         case "memory_update":

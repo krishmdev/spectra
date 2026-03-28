@@ -82,7 +82,13 @@ class Executor:
         return 'Pressed home'
 
     def open_app(self, bundle_id: str) -> str:
-        """Launch an app by bundle ID via simctl."""
+        """Launch an app by bundle ID via simctl. Skips if already in foreground."""
+        try:
+            current = self.client.app_current()
+            if current.get('bundleId') == bundle_id:
+                return f'{bundle_id} already in foreground'
+        except Exception:
+            pass
         subprocess.run(['xcrun', 'simctl', 'launch', 'booted', bundle_id],
                        capture_output=True)
         time.sleep(1)

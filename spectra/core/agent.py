@@ -165,6 +165,15 @@ def run_agent(
 
         # --- Check stuck ---
         warning = detector.check()
+        if warning == 'HARD_STUCK':
+            if verbose:
+                print(f'  Hard stuck detected — forcing done after {step} steps')
+            snap_pool.shutdown(wait=False)
+            elapsed = time.monotonic() - t_start
+            if step_callback:
+                step_callback(step, max_steps, 'done', {'summary': 'Task likely completed but agent got stuck in a loop'}, 'forced done', current_app)
+            _reflect_and_store(planner, episodic, task, history, 'loop', current_app, verbose)
+            return True  # assume task was completed since actions were executing
 
         # --- Build combined memory ---
         combined_memory = _build_combined_memory(lessons_text, agent_memory)
@@ -295,6 +304,11 @@ def run_agent(
 
         if step_callback:
             step_callback(step, max_steps, action_name, action_input, result, current_app)
+
+        # On ref errors, invalidate cache+prefetch so next step gets a fresh snapshot
+        if 'ref' in str(result).lower() and 'not found' in str(result).lower():
+            cached_snapshot = None
+            prefetch_future = None
 
         # Record for stuck detection
         detector.record(tree, action_name, action_input.get('ref'))
