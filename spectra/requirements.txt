@@ -1,0 +1,6 @@
+facebook-wda
+google-genai
+rich
+pydantic
+SpeechRecognition
+pyaudio
