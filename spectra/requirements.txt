@@ -3,8 +3,8 @@ google-genai
 rich
 pydantic
 SpeechRecognition
-pyaudio
 faster-whisper
 fastapi
 uvicorn
 websockets
+pyaudio
