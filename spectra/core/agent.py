@@ -1,11 +1,17 @@
 """Agent loop — observe → think → act cycle tying all modules together."""
 
+import concurrent.futures
 import time
 
 from core.tree_reader import TreeReader
 from core.planner import Planner
 from core.executor import Executor
 from core.stuck_detector import StuckDetector
+from core.memory import EpisodicMemory, AgentMemory
+from core.gates import ConfirmationGate
+from core.takeover import TakeoverManager
+from core.router import TaskRouter
+from core.plan_preview import PlanPreview
 
 # Terminal actions that end the loop
 _TERMINAL = {'done', 'stuck'}
@@ -27,11 +33,43 @@ _ACTION_SLEEP = {
 }
 
 
+def _reflect_and_store(planner, episodic, task, history, failure_type, app, verbose):
+    """After a failure, ask the LLM to reflect and store the lesson."""
+    try:
+        lesson = planner.reflect(task, history, failure_type)
+        if verbose:
+            print(f'  Lesson learned: {lesson}')
+        episodic.add_lesson(
+            task=task,
+            app=app,
+            lesson=lesson,
+            failure_type=failure_type,
+            history_summary='; '.join(history[-5:]),
+        )
+    except Exception as e:
+        if verbose:
+            print(f'  (reflection failed: {e})')
+
+
+def _build_combined_memory(lessons_text: str | None, agent_memory: AgentMemory) -> str | None:
+    """Combine episodic lessons and session memory into one string for the planner."""
+    parts = []
+    if lessons_text:
+        parts.append(lessons_text)
+    agent_mem_text = agent_memory.format_for_prompt()
+    if agent_mem_text:
+        parts.append(agent_mem_text)
+    return '\n\n'.join(parts) or None
+
+
 def run_agent(
     task: str,
     max_steps: int = 15,
     wda_url: str = 'http://localhost:8100',
     verbose: bool = True,
+    agent_memory: AgentMemory | None = None,
+    plan_steps: list[str] | None = None,
+    stop_check=None,
 ) -> bool:
     """Execute a natural language task on the iOS simulator.
 
@@ -40,6 +78,9 @@ def run_agent(
         max_steps: Maximum actions before timeout
         wda_url: WDA server URL
         verbose: Print each step to stdout
+        agent_memory: Shared session memory (for cross-app tasks). Created if None.
+        plan_steps: Pre-approved plan steps (from PlanPreview).
+        stop_check: Callable returning True to stop the loop (for BackgroundRunner).
 
     Returns:
         True if task completed (done), False if stuck or timed out
@@ -48,26 +89,51 @@ def run_agent(
     planner = Planner()
     executor = Executor(wda_url)
     detector = StuckDetector()
+    episodic = EpisodicMemory()
+    gate = ConfirmationGate()
+    takeover = TakeoverManager()
+
+    if agent_memory is None:
+        agent_memory = AgentMemory()
 
     history: list[str] = []
-    plan_steps: list[str] | None = None
-    # Snapshot cache — reused when last action didn't change the screen
+    current_app: str = 'unknown'
     cached_snapshot: tuple | None = None
     last_action_was_no_ui = False
+    prefetched_snapshot: tuple | None = None
+
+    # Retrieve lessons from past failures
+    lessons_text = episodic.retrieve(task)
+    if lessons_text and verbose:
+        print(f'  {lessons_text}')
 
     t_start = time.monotonic()
 
     for step in range(1, max_steps + 1):
+        # --- Stop check (for BackgroundRunner) ---
+        if stop_check and stop_check():
+            if verbose:
+                print('  Agent stopped by external request')
+            break
+
         # --- Observe (skip WDA round-trip if nothing changed) ---
         if last_action_was_no_ui and cached_snapshot is not None:
             tree, ref_map, metadata = cached_snapshot
+        elif prefetched_snapshot is not None:
+            tree, ref_map, metadata = prefetched_snapshot
+            cached_snapshot = prefetched_snapshot
+            prefetched_snapshot = None
         else:
             tree, ref_map, metadata = reader.snapshot()
             cached_snapshot = (tree, ref_map, metadata)
         last_action_was_no_ui = False
+        current_app = metadata.get('app_name', current_app)
 
         # --- Check stuck ---
         warning = detector.check()
+
+        # --- Build combined memory ---
+        combined_memory = _build_combined_memory(lessons_text, agent_memory)
 
         # --- Think ---
         if metadata['perception_mode'] == 'screenshot':
@@ -78,6 +144,7 @@ def run_agent(
                 history=history,
                 metadata=metadata,
                 warning=warning,
+                memory=combined_memory,
                 plan=plan_steps,
             )
         else:
@@ -87,6 +154,7 @@ def run_agent(
                 history=history,
                 metadata=metadata,
                 warning=warning,
+                memory=combined_memory,
                 plan=plan_steps,
             )
 
@@ -101,6 +169,7 @@ def run_agent(
         if action_name == 'remember':
             key = action_input['key']
             value = action_input['value']
+            agent_memory.store(key, value)
             history.append(f'Step {step}: remember {key}={value}')
             if verbose:
                 print(f'    Stored: {key} = {value}')
@@ -119,9 +188,42 @@ def run_agent(
         if action_name == 'handoff':
             reason = action_input.get('reason', '')
             history.append(f'Step {step}: handoff — {reason}')
-            if verbose:
-                print(f'    HANDOFF: {reason}')
-            return False  # For now, handoff ends the loop
+            takeover.pause(reason)
+            takeover.wait_for_resume()
+            # Invalidate snapshots — user has been interacting with device
+            cached_snapshot = None
+            prefetched_snapshot = None
+            continue
+
+        if action_name == 'batch':
+            actions = action_input.get('actions', [])
+            checkpoint = action_input.get('checkpoint_reason', '')
+            results = []
+            for i, item in enumerate(actions):
+                sub_action = item.get('action', item.get('name', ''))
+                # Gate check for each sub-action in batch
+                if gate.check({'name': sub_action, 'input': item}, ref_map):
+                    if not gate.request_confirmation({'name': sub_action, 'input': item}, ref_map):
+                        history.append(f'Step {step}: batch sub-action {sub_action} → REJECTED by user')
+                        break
+                result = executor.run(sub_action, item, ref_map)
+                results.append(f'{sub_action} → {result}')
+                if verbose:
+                    print(f'    [{i+1}/{len(actions)}] {result}')
+                if i < len(actions) - 1:
+                    time.sleep(_ACTION_SLEEP.get(sub_action, 0.3))
+            history.append(f'Step {step}: batch ({len(actions)} actions) → {"; ".join(results)}')
+            if checkpoint:
+                history.append(f'CHECKPOINT: verify {checkpoint}')
+            last_action_was_no_ui = False
+            time.sleep(_ACTION_SLEEP.get(actions[-1].get('action', ''), 0.3) if actions else 0.3)
+            continue
+
+        # --- Confirmation gate ---
+        if gate.check({'name': action_name, 'input': action_input}, ref_map):
+            if not gate.request_confirmation({'name': action_name, 'input': action_input}, ref_map):
+                history.append(f'Step {step}: {action_name} → REJECTED by user')
+                continue
 
         # --- Act ---
         result = executor.run(action_name, action_input, ref_map)
@@ -138,12 +240,89 @@ def run_agent(
             elapsed = time.monotonic() - t_start
             if verbose:
                 print(f'  Finished in {step} steps, {elapsed:.1f}s')
+            if action_name == 'stuck':
+                _reflect_and_store(planner, episodic, task, history, 'stuck', current_app, verbose)
             return action_name == 'done'
 
-        # Wait for UI to settle — adaptive per action type
-        time.sleep(_ACTION_SLEEP.get(action_name, 0.5))
+        # Wait for UI to settle — pipeline WDA fetch during sleep
+        sleep_time = _ACTION_SLEEP.get(action_name, 0.5)
+        if sleep_time > 0:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(reader.snapshot)
+                time.sleep(sleep_time)
+                try:
+                    prefetched_snapshot = future.result(timeout=2.0)
+                except Exception:
+                    prefetched_snapshot = None
+        else:
+            prefetched_snapshot = None
 
     elapsed = time.monotonic() - t_start
     if verbose:
         print(f'  Timed out after {max_steps} steps, {elapsed:.1f}s')
+    _reflect_and_store(planner, episodic, task, history, 'timeout', current_app, verbose)
+    agent_memory.clear()
     return False
+
+
+def run_task(
+    user_input: str,
+    max_steps: int = 25,
+    wda_url: str = 'http://localhost:8100',
+    verbose: bool = True,
+) -> bool:
+    """Top-level entry point — routes task, previews plan, runs agent across app(s).
+
+    Args:
+        user_input: Natural language instruction from the user.
+        max_steps: Maximum actions per app.
+        wda_url: WDA server URL.
+        verbose: Print progress to stdout.
+
+    Returns:
+        True if task completed successfully.
+    """
+    planner = Planner()
+    executor = Executor(wda_url)
+    router = TaskRouter(planner)
+    preview = PlanPreview(planner)
+    agent_memory = AgentMemory()
+
+    # 1. Route task to correct app(s)
+    route = router.route(user_input)
+    if verbose:
+        print(f'  Route: {route["category"]} → {[a["name"] for a in route["apps"]]}')
+
+    plan_steps = None
+
+    # 2. Generate and preview plan for complex tasks
+    if route['multi_app'] or route.get('comparison'):
+        plan = preview.generate_plan(route['refined_task'])
+        approved, plan = preview.present_and_confirm(plan)
+        if not approved:
+            if verbose:
+                print('  Plan rejected by user')
+            return False
+        plan_steps = plan
+
+    # 3. Run agent loop for each target app
+    apps = route.get('apps') or []
+    if not apps:
+        # No specific app — run agent directly (e.g. home screen task)
+        return run_agent(
+            route['refined_task'], max_steps=max_steps, wda_url=wda_url,
+            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps,
+        )
+
+    success = False
+    for app in apps:
+        if verbose:
+            print(f'\n  Opening {app["name"]}...')
+        executor.open_app(app['bundle_id'])
+        success = run_agent(
+            route['refined_task'], max_steps=max_steps, wda_url=wda_url,
+            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps,
+        )
+
+    agent_memory.clear()
+    return success

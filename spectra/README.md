@@ -37,44 +37,71 @@ Spectra operates on a continuous **Observe-Think-Act** loop. It relies on `faceb
 
 ---
 
-## 3. Setup and Installation
+## 3. Quick Start (CLI Setup)
 
-### Prerequisites
+This guide assumes you are starting from a clean terminal. Copy and paste these commands.
 
-* macOS (required for Xcode and the iOS Simulator)
-* Xcode and Command Line Tools
-* Python 3.11 or higher
-* Google Gemini API Key
+### 3.1 Clone and Environment Setup
 
-### Environment Configuration
-
-1. **Clone the repository and initialize the Python environment:**
 ```bash
+# 1. Clone the repository
+git clone https://github.com/krishmdev/yhack.git
+cd yhack/spectra
+
+# 2. Initialize Python virtual environment
 python3 -m venv venv
 source venv/bin/activate
+
+# 3. Install core dependencies
 pip install -r requirements.txt
-```
 
-2. **Configure environment variables:**
-Copy the example file and append your API credentials.
-```bash
+# 4. Set up environment variables
 cp .env.example .env
-```
-Inside `.env`:
-```env
-GEMINI_API_KEY=your_key_here
+# Open .env and add your GEMINI_API_KEY
 ```
 
-### Simulator Configuration
+### 3.2 Launching the iOS Simulator (CLI)
 
-Spectra requires a running iOS Simulator with WebDriverAgent installed.
+You can launch the simulator directly from your terminal:
 
-1. Launch an iOS Simulator via Xcode or `simulator` CLI.
-2. Build and run WebDriverAgent (WDA) on the booted simulator. Ensure the server is reachable at `http://localhost:8100`.
+```bash
+# List available simulators and grab a UUID (e.g., iPhone 15)
+xcrun simctl list devices | grep "iPhone 15"
+
+# Boot the simulator
+xcrun simctl boot "iPhone 15" # Or use the UUID
+open -a Simulator
+```
+
+### 3.3 WebDriverAgent (WDA) CLI Initialization
+
+WebDriverAgent is the bridge between Python and iOS. You can run it without opening the Xcode UI:
+
+```bash
+# Locate the WebDriverAgent project (usually inside your site-packages or local clone)
+# Run the test session to start the server on localhost:8100
+xcodebuild -project WebDriverAgent.xcodeproj \
+           -scheme WebDriverAgentRunner \
+           -destination "platform=iOS Simulator,name=iPhone 15" \
+           test
+```
+
+### 3.4 Verify and Run
+
+Check if the bridge is alive:
+```bash
+curl http://localhost:8100/status
+```
+
+If you see a JSON blob with `value: { "state": "success" ... }`, you are ready to run:
+```bash
+python3 main.py --task "Toggle Dark Mode"
+```
 
 ---
 
 ## 4. Module Specifications
+
 
 The system is highly modular. Teammates addressing specific features should reference the appropriate module below.
 

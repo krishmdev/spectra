@@ -19,34 +19,17 @@ iOS NAVIGATION:
 - Containers may have content below the fold — scroll to find more
 - "Loading..." or spinners mean wait before acting
 
-iOS SETTINGS APP:
-- Settings is a scrollable list. If you don't see what you need, scroll DOWN (not up) to reveal more items.
-- Items are organized top-to-bottom: Airplane Mode, Wi-Fi, Bluetooth, ... General, ... Display & Brightness, ... Camera, etc.
-- If you've scrolled and still can't find an item, use the SearchField to search for it by name — this is faster than scrolling repeatedly.
-- After typing in a search field, the results appear as tappable cells below. Tap the matching CELL result, not the search field itself.
-
-SEARCH BEHAVIOR:
-- When you type in a SearchField, results appear as Cell or Button elements in the tree.
-- Look for a Cell or Button whose label matches what you searched for and tap THAT element.
-- Do NOT tap the SearchField again after typing — that just refocuses it.
-- Do NOT call `wait` repeatedly hoping results appear — they show up in the next tree snapshot.
-
-SCROLLING:
-- "scroll down" reveals content BELOW the current view (use this to find items further down a list).
-- "scroll up" reveals content ABOVE the current view (use this to go back to the top).
-- If you need an item near the top of a list, scroll UP. If you need an item further down, scroll DOWN.
-- If you've scrolled 2+ times in the same direction without finding your target, STOP and try searching instead.
-
 MEMORY:
 - Use the `remember` tool to store values you'll need later (prices, names, addresses, etc.)
 - Stored values appear in the MEMORY section of each turn
 - Use memory when comparing information across different apps
 - Memory persists across app switches within a single task
+- PAST LESSONS from previous failed runs may also appear — use them to avoid repeating mistakes
 
 SAFETY:
 - NEVER enter passwords, payment details, or personal information. Use `handoff` to give control to the user for sensitive input.
 - If you see a SecureTextField (password field), ALWAYS use `handoff`.
-- Before tapping buttons labeled "Send", "Submit", "Place Order", "Pay", "Purchase", "Delete", or "Book" — pause and explain what you're about to do in your reasoning. The system may ask the user for confirmation.
+- Before tapping buttons that look like they confirm transactions or send messages, explain what you're about to do in your reasoning. The system may ask the user for confirmation.
 
 PLANNING:
 - For complex tasks involving multiple apps or more than 5 steps, use the `plan` tool first to outline your approach.
@@ -56,12 +39,13 @@ PLANNING:
 RULES:
 1. Examine the tree carefully before acting. Identify what screen you're on and what elements are available.
 2. Choose exactly ONE action per turn.
-3. If the target isn't visible, scroll DOWN once or use search — don't scroll the same direction repeatedly.
+3. If the target isn't visible, try scrolling to reveal more content.
 4. If you've repeated the same action 2+ times without progress, try a completely different strategy.
 5. Handle alerts and permission dialogs immediately.
 6. Before calling done(), verify the screen shows the expected result.
 7. Keep reasoning concise — one sentence.
-8. Prefer tapping visible elements over scrolling. If you can see something related to your goal, tap it."""
+8. Prefer tapping visible elements over scrolling. If you can see something related to your goal, tap it.
+9. Use `batch` for predictable 2-5 step sequences where you're confident about the screen transitions. Never batch past uncertain transitions or dynamic content. Always set checkpoint_reason to what should be true after the batch."""
 
 # ---------------------------------------------------------------------------
 # Tool JSON schemas (from PRD §5.3) — passed via parameters_json_schema
@@ -213,6 +197,36 @@ _TOOL_SCHEMAS = [
                 "reason": {"type": "string", "description": "Why the agent is stuck"},
             },
             "required": ["reason"],
+        },
+    },
+    {
+        "name": "batch",
+        "description": "Execute 2-5 actions in sequence without re-observing between them. Use for predictable navigation sequences (e.g., tap General then tap About). Do NOT batch across uncertain transitions, search results, or dynamic content.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["tap", "tap_xy", "type_text", "scroll", "go_back", "go_home", "wait"]},
+                            "ref": {"type": "integer"},
+                            "x": {"type": "integer"},
+                            "y": {"type": "integer"},
+                            "text": {"type": "string"},
+                            "direction": {"type": "string", "enum": ["up", "down"]},
+                            "seconds": {"type": "integer"},
+                        },
+                        "required": ["action"],
+                    },
+                    "minItems": 2,
+                    "maxItems": 5,
+                },
+                "checkpoint_reason": {"type": "string", "description": "What to verify on the next screen after batch completes"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["actions", "checkpoint_reason", "reasoning"],
         },
     },
 ]
@@ -379,6 +393,25 @@ class Planner:
         text_part = types.Part(text=message)
         contents = [types.Content(role="user", parts=[image_part, text_part])]
         return self._generate(contents)
+
+    def reflect(self, task: str, history: list[str], failure_type: str) -> str:
+        """Generate a one-sentence lesson from a failed run."""
+        prompt = (
+            f'You are analyzing a failed mobile agent run.\n'
+            f'Task: {task}\n'
+            f'Failure: {failure_type}\n'
+            f'Action history:\n' + '\n'.join(history[-8:]) + '\n\n'
+            f'In ONE sentence, what specific lesson should the agent remember '
+            f'to avoid this failure next time? Name the app, screen, and what '
+            f'to do differently. Do NOT give generic advice.'
+        )
+        config = types.GenerateContentConfig(max_output_tokens=150)
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
+            config=config,
+        )
+        return response.text.strip()
 
     @staticmethod
     def _extract_action(response) -> dict:
