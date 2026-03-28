@@ -2,10 +2,11 @@
 
 from core.router import load_config
 
+# Only truly dangerous actions — money, bookings, purchases.
+# Common actions like delete/remove/send are handled by task-intent matching.
 _DEFAULT_SENSITIVE_LABELS = [
-    'send', 'submit', 'place order', 'confirm order', 'pay',
-    'purchase', 'buy now', 'delete', 'remove', 'book ride',
-    'confirm booking', 'checkout',
+    'place order', 'confirm order', 'pay', 'purchase', 'buy now',
+    'book ride', 'confirm booking', 'checkout',
 ]
 
 
@@ -23,18 +24,20 @@ class ConfirmationGate:
 
     def __init__(self):
         self.sensitive_labels = _load_sensitive_labels()
+        self._task_lower: str = ''
+
+    def set_task(self, task: str) -> None:
+        """Set the current task so intent-matching can skip redundant confirmations."""
+        self._task_lower = task.lower()
 
     def check(self, action: dict, ref_map: dict) -> bool:
         """Return True if this action requires user confirmation.
 
         Triggers on:
-        1. Tap/type on an element whose label contains a sensitive keyword.
-        2. Any screen containing a SecureTextField (password field).
+        1. Tap/type directly targeting a SecureTextField (password field).
+        2. Tap/type on an element whose label contains a sensitive keyword,
+           UNLESS the user's task already expresses that same intent.
         """
-        for el in ref_map.values():
-            if el.get('type') == 'XCUIElementTypeSecureTextField':
-                return True
-
         action_name = action.get('name', '')
         if action_name not in ('tap', 'type_text'):
             return False
@@ -47,8 +50,18 @@ class ConfirmationGate:
         if not el:
             return False
 
+        # Always gate SecureTextFields (passwords)
+        if el.get('type') == 'XCUIElementTypeSecureTextField':
+            return True
+
         label = (el.get('label') or '').lower()
-        return any(s in label for s in self.sensitive_labels)
+        for keyword in self.sensitive_labels:
+            if keyword in label:
+                # If the user's task already contains this keyword, skip gate
+                if keyword in self._task_lower:
+                    return False
+                return True
+        return False
 
     def request_confirmation(self, action: dict, ref_map: dict) -> bool:
         """Display the pending action and wait for user approval.

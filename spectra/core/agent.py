@@ -1,4 +1,5 @@
 """Agent loop — observe → think → act cycle tying all modules together."""
+from __future__ import annotations
 
 import concurrent.futures
 import time
@@ -17,17 +18,18 @@ from core.plan_preview import PlanPreview
 _TERMINAL = {'done', 'stuck'}
 
 # Non-UI actions that don't change the screen — skip re-snapshot after these
-_NO_UI_ACTIONS = {'remember', 'plan'}
+_NO_UI_ACTIONS = {'remember', 'plan', 'ask_user'}
 
 # Adaptive sleep: action → seconds to wait for UI to settle
 _ACTION_SLEEP = {
-    'tap': 0.3,
-    'tap_xy': 0.3,
-    'scroll': 0.4,
-    'type_text': 0.4,
-    'go_back': 0.5,
-    'go_home': 0.5,
-    'wait': 0,       # the wait action itself handles the delay
+    'tap': 0.15,
+    'tap_xy': 0.15,
+    'scroll': 0.2,
+    'type_text': 0.2,
+    'go_back': 0.2,
+    'go_home': 0.2,
+    'open_app': 0,    # executor already sleeps 1s internally
+    'wait': 0,        # the wait action itself handles the delay
     'done': 0,
     'stuck': 0,
 }
@@ -70,6 +72,10 @@ def run_agent(
     agent_memory: AgentMemory | None = None,
     plan_steps: list[str] | None = None,
     stop_check=None,
+    gate: ConfirmationGate | None = None,
+    takeover: TakeoverManager | None = None,
+    step_callback=None,
+    ask_user_fn=None,
 ) -> bool:
     """Execute a natural language task on the iOS simulator.
 
@@ -81,6 +87,9 @@ def run_agent(
         agent_memory: Shared session memory (for cross-app tasks). Created if None.
         plan_steps: Pre-approved plan steps (from PlanPreview).
         stop_check: Callable returning True to stop the loop (for BackgroundRunner).
+        gate: ConfirmationGate instance (injectable for WebSocket server).
+        takeover: TakeoverManager instance (injectable for WebSocket server).
+        step_callback: Optional callable(step, action_name, action_input, result) per step.
 
     Returns:
         True if task completed (done), False if stuck or timed out
@@ -90,17 +99,24 @@ def run_agent(
     executor = Executor(wda_url)
     detector = StuckDetector()
     episodic = EpisodicMemory()
-    gate = ConfirmationGate()
-    takeover = TakeoverManager()
+    if gate is None:
+        gate = ConfirmationGate()
+    if takeover is None:
+        takeover = TakeoverManager()
 
     if agent_memory is None:
         agent_memory = AgentMemory()
+
+    gate.set_task(task)
 
     history: list[str] = []
     current_app: str = 'unknown'
     cached_snapshot: tuple | None = None
     last_action_was_no_ui = False
-    prefetched_snapshot: tuple | None = None
+    prefetch_future: concurrent.futures.Future | None = None
+
+    # Reuse a single thread pool for prefetch (avoids per-step creation overhead)
+    snap_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     # Retrieve lessons from past failures
     lessons_text = episodic.retrieve(task)
@@ -117,15 +133,33 @@ def run_agent(
             break
 
         # --- Observe (skip WDA round-trip if nothing changed) ---
+        t_obs = time.monotonic()
         if last_action_was_no_ui and cached_snapshot is not None:
             tree, ref_map, metadata = cached_snapshot
-        elif prefetched_snapshot is not None:
-            tree, ref_map, metadata = prefetched_snapshot
-            cached_snapshot = prefetched_snapshot
-            prefetched_snapshot = None
+        elif prefetch_future is not None:
+            # Wait for the in-flight prefetch (started at end of previous step)
+            try:
+                tree, ref_map, metadata = prefetch_future.result(timeout=12.0)
+                cached_snapshot = (tree, ref_map, metadata)
+            except Exception:
+                if cached_snapshot is not None:
+                    tree, ref_map, metadata = cached_snapshot
+                else:
+                    prefetch_future = None
+                    continue
+            prefetch_future = None
         else:
-            tree, ref_map, metadata = reader.snapshot()
+            _snap_future = snap_pool.submit(reader.snapshot)
+            try:
+                tree, ref_map, metadata = _snap_future.result(timeout=12.0)
+            except Exception:
+                if cached_snapshot is not None:
+                    tree, ref_map, metadata = cached_snapshot
+                else:
+                    continue
             cached_snapshot = (tree, ref_map, metadata)
+        if verbose:
+            print(f'    [timing] observe={time.monotonic()-t_obs:.2f}s')
         last_action_was_no_ui = False
         current_app = metadata.get('app_name', current_app)
 
@@ -136,6 +170,7 @@ def run_agent(
         combined_memory = _build_combined_memory(lessons_text, agent_memory)
 
         # --- Think ---
+        t_think = time.monotonic()
         if metadata['perception_mode'] == 'screenshot':
             action = planner.next_action_vision(
                 screenshot_b64=metadata['screenshot_b64'],
@@ -157,6 +192,7 @@ def run_agent(
                 memory=combined_memory,
                 plan=plan_steps,
             )
+        think_time = time.monotonic() - t_think
 
         action_name = action['name']
         action_input = action['input']
@@ -164,6 +200,7 @@ def run_agent(
         if verbose:
             reasoning = action_input.get('reasoning', action_input.get('summary', action_input.get('reason', '')))
             print(f'  Step {step}: {action_name} — {reasoning}')
+            print(f'    [timing] think={think_time:.2f}s')
 
         # --- Handle special actions ---
         if action_name == 'remember':
@@ -195,6 +232,23 @@ def run_agent(
             prefetched_snapshot = None
             continue
 
+        if action_name == 'ask_user':
+            question = action_input.get('question', '')
+            options = action_input.get('options', [])
+            history.append(f'Step {step}: ask_user — {question}')
+            if ask_user_fn:
+                answer = ask_user_fn(question, options)
+            else:
+                if verbose and options:
+                    for i, opt in enumerate(options, 1):
+                        print(f'    {i}. {opt}')
+                answer = input(f'    {question}: ').strip()
+            history.append(f'  User answered: {answer}')
+            if verbose:
+                print(f'    User: {answer}')
+            last_action_was_no_ui = True
+            continue
+
         if action_name == 'batch':
             actions = action_input.get('actions', [])
             checkpoint = action_input.get('checkpoint_reason', '')
@@ -215,8 +269,15 @@ def run_agent(
             history.append(f'Step {step}: batch ({len(actions)} actions) → {"; ".join(results)}')
             if checkpoint:
                 history.append(f'CHECKPOINT: verify {checkpoint}')
+            if step_callback:
+                detail = checkpoint or f'batch of {len(actions)} actions'
+                step_callback(step, max_steps, 'batch', {'reasoning': detail}, '; '.join(results), current_app)
+            detector.record(tree, 'batch', None)
             last_action_was_no_ui = False
-            time.sleep(_ACTION_SLEEP.get(actions[-1].get('action', ''), 0.3) if actions else 0.3)
+            sleep_time = _ACTION_SLEEP.get(actions[-1].get('action', ''), 0.3) if actions else 0.3
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            prefetch_future = snap_pool.submit(reader.snapshot)
             continue
 
         # --- Confirmation gate ---
@@ -232,11 +293,15 @@ def run_agent(
         if verbose:
             print(f'    → {result}')
 
+        if step_callback:
+            step_callback(step, max_steps, action_name, action_input, result, current_app)
+
         # Record for stuck detection
         detector.record(tree, action_name, action_input.get('ref'))
 
         # --- Check terminal ---
         if action_name in _TERMINAL:
+            snap_pool.shutdown(wait=False)
             elapsed = time.monotonic() - t_start
             if verbose:
                 print(f'  Finished in {step} steps, {elapsed:.1f}s')
@@ -244,19 +309,14 @@ def run_agent(
                 _reflect_and_store(planner, episodic, task, history, 'stuck', current_app, verbose)
             return action_name == 'done'
 
-        # Wait for UI to settle — pipeline WDA fetch during sleep
-        sleep_time = _ACTION_SLEEP.get(action_name, 0.5)
+        # Fire off prefetch immediately — don't wait for it here.
+        # The next iteration's observe phase will wait on the future.
+        sleep_time = _ACTION_SLEEP.get(action_name, 0.3)
         if sleep_time > 0:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(reader.snapshot)
-                time.sleep(sleep_time)
-                try:
-                    prefetched_snapshot = future.result(timeout=2.0)
-                except Exception:
-                    prefetched_snapshot = None
-        else:
-            prefetched_snapshot = None
+            time.sleep(sleep_time)
+        prefetch_future = snap_pool.submit(reader.snapshot)
 
+    snap_pool.shutdown(wait=False)
     elapsed = time.monotonic() - t_start
     if verbose:
         print(f'  Timed out after {max_steps} steps, {elapsed:.1f}s')

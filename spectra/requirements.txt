@@ -4,3 +4,7 @@ rich
 pydantic
 SpeechRecognition
 pyaudio
+faster-whisper
+fastapi
+uvicorn
+websockets

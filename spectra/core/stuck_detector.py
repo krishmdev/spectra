@@ -1,4 +1,5 @@
 """Deterministic loop and stuck detection outside the LLM."""
+from __future__ import annotations
 
 import hashlib
 

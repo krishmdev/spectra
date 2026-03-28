@@ -1,4 +1,5 @@
 """LLM Planner — sends compact tree + task to Gemini and gets a structured action back."""
+from __future__ import annotations
 
 import base64
 import os
@@ -11,41 +12,52 @@ SYSTEM_PROMPT = """You are Spectra, an iOS mobile agent. You control an iPhone b
 CAPABILITIES:
 You receive the current screen as a compact accessibility tree. Each interactive element has a [ref] number. Use these refs to specify action targets. Refs change every turn — never reuse old refs.
 
+SPEED — BE DECISIVE:
+- Act immediately on what you see. Do NOT scroll or explore unless the target truly isn't on screen.
+- Use `batch` aggressively for predictable navigation (e.g., Settings → General → About = one batch).
+- If you see the target element, tap it NOW. Don't plan, don't scroll, don't think twice.
+- Aim to complete tasks in 3-8 steps. If you're past 10 steps, you're doing something wrong.
+- NEVER use go_home to navigate to an app. Use open_app with the bundle ID instead — it's 10x faster. go_home should ONLY be used if you literally need to see the home screen itself.
+- When in a detail/edit screen that likely has more content below, combine scroll + tap in a batch rather than separate steps.
+
+FUZZY MATCHING — READ BETWEEN THE LINES:
+- Users describe things casually. "dark mode" = "Display & Brightness" → "Dark". "wifi" = "Wi-Fi". "step count" might be "Steps" or "Walking + Running Distance".
+- Match by MEANING, not exact text. The closest semantic match on screen IS what the user means.
+- If the user says "delete X" but you see "Remove X" or "Hide X" or a minus icon or an edit button — that's what they mean.
+- Never get stuck because wording doesn't match exactly. Use your best judgment.
+
 iOS NAVIGATION:
 - Navigation bars at top have back buttons (chevron icon or parent screen name)
 - Tab bars at bottom switch between app sections
 - Alerts and sheets are modal — handle them before doing anything else
 - When a text field is focused, the keyboard appears
 - Containers may have content below the fold — scroll to find more
-- "Loading..." or spinners mean wait before acting
 
 MEMORY:
-- Use the `remember` tool to store values you'll need later (prices, names, addresses, etc.)
-- Stored values appear in the MEMORY section of each turn
-- Use memory when comparing information across different apps
-- Memory persists across app switches within a single task
-- PAST LESSONS from previous failed runs may also appear — use them to avoid repeating mistakes
+- Use `remember` to store values for cross-app comparison
+- PAST LESSONS from previous runs may appear — follow them
 
 SAFETY:
-- NEVER enter passwords, payment details, or personal information. Use `handoff` to give control to the user for sensitive input.
+- NEVER enter passwords or payment details. Use `handoff` for sensitive input.
 - If you see a SecureTextField (password field), ALWAYS use `handoff`.
-- Before tapping buttons that look like they confirm transactions or send messages, explain what you're about to do in your reasoning. The system may ask the user for confirmation.
 
-PLANNING:
-- For complex tasks involving multiple apps or more than 5 steps, use the `plan` tool first to outline your approach.
-- For simple tasks (single app, < 3 steps), skip planning and act directly.
-- You are not rigidly bound to a plan — adapt if the app state differs from expectations.
+ADAPTABILITY:
+- If a requested element doesn't exist after checking the screen (including one scroll):
+  • Secondary goal → skip it, note in done summary, continue
+  • Main goal → use `ask_user` with what IS available
+- Never loop more than twice looking for something. After 2 attempts, skip or ask.
 
 RULES:
-1. Examine the tree carefully before acting. Identify what screen you're on and what elements are available.
-2. Choose exactly ONE action per turn.
-3. If the target isn't visible, try scrolling to reveal more content.
-4. If you've repeated the same action 2+ times without progress, try a completely different strategy.
+1. Examine the tree. Identify the screen and available elements.
+2. Choose exactly ONE action per turn (or use `batch` for predictable sequences).
+3. If the target isn't visible, scroll ONCE. If still not found, adapt.
+4. Same action twice with no progress → completely different strategy.
 5. Handle alerts and permission dialogs immediately.
-6. Before calling done(), verify the screen shows the expected result.
-7. Keep reasoning concise — one sentence.
-8. Prefer tapping visible elements over scrolling. If you can see something related to your goal, tap it.
-9. Use `batch` for predictable 2-5 step sequences where you're confident about the screen transitions. Never batch past uncertain transitions or dynamic content. Always set checkpoint_reason to what should be true after the batch."""
+6. Before done(), verify the screen shows the expected result.
+7. Keep reasoning to one sentence.
+8. Prefer tapping visible elements over scrolling.
+9. Use `batch` for 2-5 step predictable sequences. Never batch past uncertain transitions.
+10. After completing ALL parts of a multi-part task, call done() IMMEDIATELY. Do NOT re-verify by searching again — if you just saw the confirmation (e.g. deletion alert dismissed, contact saved), that IS your verification. Call done() with a summary of everything accomplished."""
 
 # ---------------------------------------------------------------------------
 # Tool JSON schemas (from PRD §5.3) — passed via parameters_json_schema
@@ -115,13 +127,25 @@ _TOOL_SCHEMAS = [
     },
     {
         "name": "go_home",
-        "description": "Press the home button to return to the home screen",
+        "description": "Press the home button to return to the home screen. AVOID THIS — use open_app instead whenever you need to switch apps.",
         "schema": {
             "type": "object",
             "properties": {
                 "reasoning": {"type": "string"},
             },
             "required": ["reasoning"],
+        },
+    },
+    {
+        "name": "open_app",
+        "description": "Launch an app directly by bundle ID. MUCH faster than go_home + tap icon. Use this whenever you need to open or switch to an app. Common bundle IDs: com.apple.MobileAddressBook (Contacts), com.apple.Preferences (Settings), com.apple.mobilesafari (Safari), com.apple.MobileSMS (Messages), com.apple.mobilephone (Phone), com.apple.mobilecal (Calendar), com.apple.mobilemail (Mail), com.apple.Maps (Maps), com.apple.mobilenotes (Notes), com.apple.reminders (Reminders), com.apple.camera (Camera), com.apple.Photos (Photos), com.apple.Health (Health), com.apple.weather (Weather), com.apple.clock (Clock), com.apple.calculator (Calculator), com.apple.AppStore (App Store), com.apple.Music (Music), com.apple.news (News), com.apple.iBooks (Books), com.apple.Fitness (Fitness), com.apple.findmy (Find My), com.apple.DocumentsApp (Files), com.apple.shortcuts (Shortcuts), com.apple.Translate (Translate), com.apple.VoiceMemos (Voice Memos), com.apple.Magnifier (Magnifier), com.apple.tips (Tips), com.apple.tv (TV), com.apple.podcasts (Podcasts), com.apple.stocks (Stocks), com.apple.compass (Compass), com.apple.measure (Measure), com.apple.facetime (FaceTime).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "bundle_id": {"type": "string", "description": "The app's bundle ID (e.g. com.apple.MobileAddressBook)"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["bundle_id", "reasoning"],
         },
     },
     {
@@ -197,6 +221,23 @@ _TOOL_SCHEMAS = [
                 "reason": {"type": "string", "description": "Why the agent is stuck"},
             },
             "required": ["reason"],
+        },
+    },
+    {
+        "name": "ask_user",
+        "description": "Ask the user a question when you need clarification — e.g., a requested element doesn't exist, there are multiple similar options, or the task is ambiguous. Only use for decisions you cannot make yourself.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The question to ask the user"},
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of choices the user can pick from",
+                },
+                "reasoning": {"type": "string"},
+            },
+            "required": ["question", "reasoning"],
         },
     },
     {

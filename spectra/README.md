@@ -1,190 +1,456 @@
-# Spectra: Accessibility-Tree iOS Agent
+# Spectra
 
-Spectra is an iOS mobile automation agent that controls applications by interacting directly with the accessibility tree. Unlike current vision-based agents that rely on coordinate-based screenshot parsing, Spectra reads the structured data used by VoiceOver to identify and interact with UI elements reliably.
+Spectra is an accessibility-tree-first iOS agent. It controls apps on an iPhone simulator by reading the structured accessibility tree exposed through WebDriverAgent, planning the next action with Gemini, and executing taps, typing, scrolling, and navigation through WDA.
 
-This read-based approach reduces the context window to 200-500 tokens per state (compared to 3,000-5,000 tokens for vision models), significantly decreasing latency and cost while remaining completely resilient to UI layout and coordinate changes.
+The current codebase is split across:
+
+- a Python backend that routes tasks, plans actions, runs the agent loop, and serves a WebSocket API
+- a SwiftUI iOS client that submits tasks, shows live progress, handles approvals, and presents results
+- a small voice pipeline that can capture speech on the Mac host and transcribe it locally
+
+Unlike screenshot-only computer-use systems, Spectra uses the accessibility tree as its primary perception layer. That gives the model semantic UI elements like `Cell "Wi-Fi"` or `Button "Send"` instead of forcing it to infer everything from pixels.
 
 ## Table of Contents
 
-1. [Project Status](#project-status)
-2. [Architecture Overview](#architecture-overview)
-3. [Setup and Installation](#setup-and-installation)
-4. [Module Specifications](#module-specifications)
-5. [Data Contracts](#data-contracts)
-6. [Testing and Development](#testing-and-development)
+1. [What It Does](#what-it-does)
+2. [System Architecture](#system-architecture)
+3. [Repository Layout](#repository-layout)
+4. [How The Runtime Works](#how-the-runtime-works)
+5. [Environment Setup](#environment-setup)
+6. [Running Spectra](#running-spectra)
+7. [Testing](#testing)
+8. [Configuration](#configuration)
+9. [Known Constraints](#known-constraints)
 
----
+## What It Does
 
-## 1. Project Status
+Spectra currently supports:
 
-The project has concluded **Sprint 5**. 
-The core text-based automation loop is complete and functional. The agent can successfully observe the accessibility tree, formulate action plans using the Gemini API, and execute actions on the iOS simulator.
+- natural-language task execution against iOS simulator apps
+- app routing for supported domains such as Settings, Messages, rideshare, food delivery, and grocery
+- multi-app workflows with shared session memory
+- plan previews for more complex tasks
+- confirmation gates before sensitive actions such as send, pay, purchase, delete, or checkout
+- user handoff for sensitive input such as passwords or payment details
+- screenshot fallback when the accessibility tree is unavailable or too sparse
+- a SwiftUI control surface with live action history, memory pills, approval sheets, and result summaries
+- actionable local notifications that let the user approve or deny confirmations directly from the notification banner
+- host-side voice capture using the Mac microphone with local transcription via `faster-whisper`
 
-**Parallel Sprints (In Progress / Upcoming):**
-* **Sprint 6:** Voice input integration and Rich terminal UI.
-* **Sprint 7:** Action recording and deterministic replay capabilities.
-* **Sprint 8:** Final demo deployment and polish.
+## System Architecture
 
----
+At a high level, Spectra is a three-part system:
 
-## 2. Architecture Overview
-
-Spectra operates on a continuous **Observe-Think-Act** loop. It relies on `facebook-wda` to communicate with WebDriverAgent running on an iOS Simulator.
-
-* **Observe:** The Tree Reader pulls the accessibility tree XML from WebDriverAgent, filters approximately 2,000 raw elements down to the interactive elements, and assigns stable reference numbers `[1]`, `[2]`, `[3]`. If the tree is sparse or broken, it automatically falls back to base64 screenshot capture.
-* **Think:** The LLM Planner passes the compact tree and user task to Gemini via `tool_use`. Gemini computes a structured action JSON.
-* **Act:** The Action Executor translates the tool call into a WebDriverAgent REST command, waits for UI stabilization, and returns control to the loop.
-
----
-
-## 3. Quick Start (CLI Setup)
-
-This guide assumes you are starting from a clean terminal. Copy and paste these commands.
-
-### 3.1 Clone and Environment Setup
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/krishmdev/yhack.git
-cd yhack/spectra
-
-# 2. Initialize Python virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# 3. Install core dependencies
-pip install -r requirements.txt
-
-# 4. Set up environment variables
-cp .env.example .env
-# Open .env and add your GEMINI_API_KEY
+```text
+SwiftUI iOS app  <---- WebSocket ---->  FastAPI server  ---->  Agent runtime
+     |                                        |                    |
+     |                                        |                    |
+ task input, UI,                              |                    |
+ notifications, approvals                     |                    |
+                                              v                    v
+                                      task routing, plan      tree read -> plan -> act
+                                      preview, memory,        against WebDriverAgent
+                                      confirmation bridge
 ```
 
-### 3.2 Launching the iOS Simulator (CLI)
+### Main runtime path
 
-You can launch the simulator directly from your terminal:
+1. The iOS app sends a `command` message over WebSocket.
+2. The Python server creates a task thread in [`server/ws_server.py`](server/ws_server.py).
+3. The server routes the task with [`core/router.py`](core/router.py).
+4. If the task is multi-app or comparative, it generates a preview plan with [`core/plan_preview.py`](core/plan_preview.py) and waits for user approval from the iOS client.
+5. For each target app, the server launches the app on the simulator and calls [`core/agent.py`](core/agent.py).
+6. The agent loop:
+   - reads the current screen through [`core/tree_reader.py`](core/tree_reader.py)
+   - compresses the raw XML into a compact tree using [`core/tree_parser.py`](core/tree_parser.py)
+   - asks Gemini for the next structured tool call via [`core/planner.py`](core/planner.py)
+   - checks confirmation and takeover gates
+   - executes the action through [`core/executor.py`](core/executor.py)
+7. Progress, approvals, memory updates, handoff requests, questions, and final results are streamed back to the iOS app over WebSocket.
+8. The iOS app can surface confirmation requests either as in-app sheets or actionable notifications, and those notification actions send approval decisions back over the same socket.
+
+### Why the accessibility tree matters
+
+The agent does not plan from screen coordinates alone. It primarily sees a compact semantic tree such as:
+
+```text
+[1] NavBar "Settings"
+[2] Cell "Wi-Fi" -> "Connected"
+[3] Cell "Bluetooth" -> "On"
+[4] Cell "General"
+```
+
+The planner chooses a logical target by reference number, and the executor converts that ref back into the stored coordinates from the parsed tree. When WDA cannot provide a useful tree, Spectra falls back to screenshot mode and uses coordinate-based actions instead.
+
+### Core backend components
+
+- [`core/tree_parser.py`](core/tree_parser.py): filters raw WDA XML down to meaningful interactive and structural elements, assigns refs, and builds the `ref_map`
+- [`core/tree_reader.py`](core/tree_reader.py): reads the screen through WDA, extracts metadata, and switches to screenshot fallback when needed
+- [`core/planner.py`](core/planner.py): defines the Gemini system prompt and tool schemas, then requests the next action
+- [`core/executor.py`](core/executor.py): turns planner actions into WDA commands such as tap, type, scroll, go back, and go home
+- [`core/agent.py`](core/agent.py): orchestrates observe -> think -> act, memory injection, stuck detection, batching, handoff, and step callbacks
+- [`core/router.py`](core/router.py): classifies a task and selects app targets from [`config/apps.json`](config/apps.json)
+- [`core/plan_preview.py`](core/plan_preview.py): generates high-level step plans for more complex tasks
+- [`core/memory.py`](core/memory.py): provides session-scoped agent memory and persistent episodic lessons
+- [`core/gates.py`](core/gates.py): intercepts potentially sensitive actions before execution, with task-aware logic to avoid redundant prompts when the user explicitly asked for that action
+- [`core/takeover.py`](core/takeover.py): pauses the agent so the user can complete sensitive interaction manually
+- [`core/stuck_detector.py`](core/stuck_detector.py): detects repeated screens or repeated actions
+- [`server/ws_server.py`](server/ws_server.py): bridges the Python runtime and the SwiftUI client using FastAPI WebSockets
+
+### iOS client architecture
+
+The iOS app in [`ios/Spectra/Spectra`](ios/Spectra/Spectra) is the current user-facing control surface.
+
+- [`SpectraApp.swift`](ios/Spectra/Spectra/SpectraApp.swift): app entry point, notification setup, WebSocket bootstrap, and actionable notification handling for approve/deny
+- [`Services/WebSocketService.swift`](ios/Spectra/Spectra/Services/WebSocketService.swift): persistent WebSocket client with connection verification, stale-callback protection, ping-based liveness checks, auto-reconnect, state publishing, and protocol handling
+- [`Views/HomeView.swift`](ios/Spectra/Spectra/Views/HomeView.swift): task input, task history cards, voice trigger, navigation into task execution
+- [`Views/TaskRunningView.swift`](ios/Spectra/Spectra/Views/TaskRunningView.swift): live plan, memory pills, action log, stop button, approval and question sheets
+- [`Views/ConfirmationSheet.swift`](ios/Spectra/Spectra/Views/ConfirmationSheet.swift): sensitive action confirmations and takeover completion UI
+- [`Views/AskUserSheet.swift`](ios/Spectra/Spectra/Views/AskUserSheet.swift): user clarification prompts from the planner
+- [`Views/ResultView.swift`](ios/Spectra/Spectra/Views/ResultView.swift): completion or failure summary
+- [`Services/NotificationService.swift`](ios/Spectra/Spectra/Services/NotificationService.swift): local progress, approval, and completion notifications, including actionable confirmation buttons
+- [`Services/SpeechService.swift`](ios/Spectra/Spectra/Services/SpeechService.swift): on-device speech recognition service. This exists in the client, although the current primary voice trigger in `HomeView` uses host-side voice capture through the server.
+
+## Repository Layout
+
+```text
+spectra/
+|-- core/                 # Agent loop, planner, parser, executor, safety, memory
+|-- server/               # FastAPI WebSocket server
+|-- voice/                # Host-side voice capture and transcription
+|-- config/               # App registry and gate labels
+|-- ios/Spectra/          # SwiftUI iOS client and Xcode project
+|-- scripts/              # Convenience launch scripts
+|-- tests/                # Unit and integration tests
+|-- docs/                 # Product and internal implementation docs
+|-- requirements.txt      # Python dependencies
+`-- .env.example          # Environment variable template
+```
+
+## How The Runtime Works
+
+### 1. Task routing
+
+The backend does not always run a task against the current foreground app. It first classifies the request and maps it to app targets using [`config/apps.json`](config/apps.json). The default registry currently includes:
+
+- Settings
+- Messages
+- Uber
+- Lyft
+- DoorDash
+- Uber Eats
+- Instacart
+
+For example, a rideshare comparison task can route to both Uber and Lyft and run the agent loop in each app.
+
+### 2. Perception
+
+[`TreeReader.snapshot()`](core/tree_reader.py) returns:
+
+- a compact accessibility tree string
+- a `ref_map` mapping ref numbers to element metadata and coordinates
+- metadata such as app name, keyboard visibility, alert presence, and perception mode
+
+If WDA fails or the parsed tree contains fewer than three interactive elements, the reader switches to screenshot mode and includes a base64-encoded PNG in the metadata.
+
+### 3. Planning
+
+[`Planner`](core/planner.py) uses Gemini function calling with explicit tool schemas. The current action surface includes:
+
+- `tap`
+- `tap_xy`
+- `type_text`
+- `scroll`
+- `go_back`
+- `go_home`
+- `wait`
+- `remember`
+- `handoff`
+- `plan`
+- `done`
+- `stuck`
+- `ask_user`
+- `batch`
+
+The planner sees:
+
+- the current task
+- the current screen tree
+- recent action history
+- alert and keyboard signals
+- injected session memory
+- optional approved plan steps
+- optional stuck warnings
+
+### 4. Safety and user interaction
+
+Before execution, the runtime can pause in several ways:
+
+- confirmation gate: used for labels such as send, delete, pay, purchase, checkout, and secure text field interactions
+- handoff: used when the task requires sensitive manual input
+- ask-user: used when the planner needs clarification
+- plan preview: used before multi-app or comparison flows
+
+The confirmation gate is task-aware: if the user explicitly asked for the same sensitive action, the runtime can skip an unnecessary extra prompt.
+
+In the WebSocket flow, those pauses are surfaced in the iOS app as modal sheets and notifications. Confirmation notifications now include approve and deny actions that route directly back into the socket session.
+
+### 5. Execution
+
+The executor performs concrete WDA operations:
+
+- tapping the center point of a referenced element
+- tapping raw coordinates in screenshot mode
+- focusing and typing into text fields
+- swiping to scroll
+- left-edge swipe for back navigation
+- simulator home button action
+- launching apps with `xcrun simctl launch`
+
+### 6. Memory
+
+Spectra has two memory layers:
+
+- `AgentMemory`: per-task key/value storage for live multi-app workflows
+- `EpisodicMemory`: persistent lesson storage across runs, used to inject prior failure lessons back into prompts
+
+### 7. UI feedback
+
+The iOS app presents the current product design:
+
+- a minimal home screen with recent task cards and command entry
+- a prominent microphone button for host-side voice capture
+- a task detail screen with plan progress, memory pills, and reversed action history
+- confirmation and question sheets
+- completion summaries with steps, duration, and saved memory count
+
+## Environment Setup
+
+### Prerequisites
+
+You need:
+
+- macOS
+- Xcode with iOS Simulator support
+- a bootable iOS simulator
+- Python 3.11 or newer
+- a Gemini API key
+- WebDriverAgent running against the simulator
+
+Optional, but currently useful:
+
+- microphone access on the Mac host for server-side voice capture
+- notification permission on the iOS app
+
+### 1. Clone the repository
 
 ```bash
-# List available simulators and grab a UUID (e.g., iPhone 15)
-xcrun simctl list devices | grep "iPhone 15"
+git clone <your-fork-or-repo-url>
+cd spectra
+```
 
-# Boot the simulator
-xcrun simctl boot "iPhone 15" # Or use the UUID
+### 2. Create a Python environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Set your Gemini API key in `.env`:
+
+```bash
+GEMINI_API_KEY=your-gemini-key-here
+```
+
+Then load it into the current shell:
+
+```bash
+export $(grep -v '^#' .env | xargs)
+```
+
+If you use the Python launcher in `scripts/run_server.py`, it will also load `.env` automatically before starting the server.
+
+### 4. Boot the simulator
+
+```bash
+xcrun simctl list devices
+xcrun simctl boot "iPhone 15"
 open -a Simulator
 ```
 
-### 3.3 WebDriverAgent (WDA) CLI Initialization
+### 5. Start WebDriverAgent
 
-WebDriverAgent is the bridge between Python and iOS. You can run it without opening the Xcode UI:
+Spectra expects WDA on `http://localhost:8100`.
 
 ```bash
-# Locate the WebDriverAgent project (usually inside your site-packages or local clone)
-# Run the test session to start the server on localhost:8100
 xcodebuild -project WebDriverAgent.xcodeproj \
-           -scheme WebDriverAgentRunner \
-           -destination "platform=iOS Simulator,name=iPhone 15" \
-           test
+  -scheme WebDriverAgentRunner \
+  -destination "platform=iOS Simulator,name=iPhone 15" \
+  test
 ```
 
-### 3.4 Verify and Run
+Verify that WDA is reachable:
 
-Check if the bridge is alive:
 ```bash
 curl http://localhost:8100/status
 ```
 
-If you see a JSON blob with `value: { "state": "success" ... }`, you are ready to run:
-```bash
-python3 main.py --task "Toggle Dark Mode"
-```
+### 6. Open the iOS project
 
----
+Open the Xcode project at [`ios/Spectra/Spectra.xcodeproj`](ios/Spectra/Spectra.xcodeproj), select the same booted simulator, and build the `Spectra` app.
 
-## 4. Module Specifications
+## Running Spectra
 
+The current codebase is designed around the WebSocket server plus the SwiftUI client. The older README flow using `main.py` is obsolete; there is no `main.py` entrypoint in this repository.
 
-The system is highly modular. Teammates addressing specific features should reference the appropriate module below.
+### Recommended development workflow
 
-### Core Loop Modules
+Run these in separate terminals.
 
-* `core/tree_parser.py`: Processes raw XML. Filters out invisible (`visible="false"`), zero-sized (`width=0` or `height=0`), and non-interactive layout elements. Generates the compact string representation for the LLM and the detailed `ref_map` dictionary for the Executor.
-* `core/tree_reader.py`: Establishes the WDA connection. Detects if the tree contains fewer than three interactive elements to trigger the screenshot-based fallback mechanism. Detects keyboard (`XCUIElementTypeKeyboard`) and modal alert states.
-* `core/planner.py`: Manages communication with the Gemini API. Injects the system prompt and available JSON tools (`tap`, `type_text`, `scroll`, `wait`, `go_back`, `go_home`, `remember`, `handoff`, `plan`, `done`, `stuck`). Defines the prompt caching strategy.
-* `core/executor.py`: Translates Gemini's tool selections into physical WDA commands. For example, replacing a `tap` action with a calculated center-coordinate click: `x + width/2, y + height/2`.
-* `core/agent.py`: Orchestrates the main While-loop. Ties all modules together, manages sleep timings between actions, and yields step-by-step progress history.
+#### Terminal 1: WebDriverAgent
 
-### Auxiliary Systems
+Keep WDA running on port `8100`.
 
-* `core/stuck_detector.py`: Pure logic class. Tracks md5 hashes of previous tree states and action history to detect infinite loops (e.g., repeating the same screen state or action three times sequentially).
-* `core/gates.py`: Confirmation interception. Blocks the loop and requires human CLI input before the agent executes irreversible actions (matching labels like "Send", "Buy", "Delete").
-* `core/takeover.py`: Allow the agent to pause execution entirely (the `handoff` tool) when encountering sensitive areas like `SecureTextField` password inputs or payment sheets, resuming only when the user signifies completion.
-* `core/memory.py`: A cross-app key-value dictionary. Enables workflows requiring data transmission across different applications (e.g., comparing a price in Uber to Lyft).
-* `core/router.py`: Intent routing. Matches the natural language request to an application Bundle ID using predefined registries.
-* `core/plan_preview.py`: Generates a step-by-step reasoning plan for complex tasks, allowing user approval before the agent starts its loop.
-* `core/background.py`: Threading wrapper that allows the agent to run in the background while feeding live progress updates to a UI via callbacks.
-
----
-
-## 5. Data Contracts
-
-If interacting with other modules, strictly adhere to the following schemas.
-
-### `ref_map`
-Generated by `tree_parser.py` and consumed by `executor.py`. Used to map the LLM's chosen reference integer back to accurate screen coordinates.
-```python
-{
-    1: {
-        'type': 'XCUIElementTypeCell',
-        'label': 'Wi-Fi',
-        'value': 'Connected',
-        'x': 0, 'y': 200,             
-        'width': 390, 'height': 44     
-    }
-}
-```
-
-### `metadata`
-Generated by `tree_reader.py`. Directs the `planner` on whether to utilize tree-based or vision-based prompts and warns about intercepting UI elements.
-```python
-{
-    'app_name': 'Settings',
-    'keyboard_visible': False,
-    'alert_present': True,
-    'perception_mode': 'tree', # values: 'tree' | 'screenshot'
-    'screenshot_b64': None     # populated if perception_mode == 'screenshot'
-}
-```
-
-### Tool Usage JSON Schema
-The standardized structure expected from `planner.py` when evaluating the LLM's output.
-```python
-{
-    'name': 'type_text',
-    'input': { 
-        'ref': 4, 
-        'text': 'Hello World',
-        'reasoning': 'Entering search query into the text field.' 
-    }
-}
-```
-
----
-
-## 6. Testing and Development
-
-Before submitting pull requests, run the comprehensive test suite to verify baseline functionality:
+#### Terminal 2: Spectra backend
 
 ```bash
-# Run all core tests
-pytest tests/
+source .venv/bin/activate
+python scripts/run_server.py
 ```
 
-**Key Test Files:**
-* `tests/test_tree_parser.py`: Verifies XML pruning and token compression.
-* `tests/test_tree_reader.py`: Verifies WDA connection and screenshot fallback logic.
-* `tests/test_planner.py`: Verifies Gemini API communication and tool-call schema.
-* `tests/test_memory.py`: Verifies cross-app data persistence.
-* `tests/test_gates.py`: Verifies confirmation interception for sensitive labels.
-* `tests/test_router.py`: Verifies app bundle ID matching.
-* `tests/test_takeover.py`: Verifies user handoff logic.
+This is the preferred launcher for the current codebase. It:
 
+- loads `.env` automatically
+- adds the project root to `PYTHONPATH`
+- starts Uvicorn on port `8765`
+- disables WebSocket ping timeouts at the server layer, which is useful for the long-lived simulator connection
+
+Equivalent manual launch options are still available:
+
+```bash
+# simple shell wrapper
+./scripts/start_server.sh
+
+# or direct uvicorn
+uvicorn server.ws_server:app --host 0.0.0.0 --port 8765
+```
+
+The iOS simulator client connects to:
+
+```text
+ws://localhost:8765/ws
+```
+
+#### Terminal 3: Xcode / iOS app
+
+Build and run the `Spectra` app from Xcode. Once launched, the app connects to the backend automatically.
+
+### Typical usage
+
+1. Start WDA.
+2. Start the backend server.
+3. Run the SwiftUI app on the simulator.
+4. Enter a task such as `Open General settings` or `Compare Uber and Lyft prices to the airport`.
+5. Approve plans or sensitive actions when prompted.
+6. Review the result summary in the app.
+
+### Backend-only smoke check
+
+If you want to exercise the runtime without the SwiftUI app, you can call the Python entrypoint directly:
+
+```bash
+source .venv/bin/activate
+export $(grep -v '^#' .env | xargs)
+PYTHONPATH=. python -c "from core.agent import run_task; run_task('Open General settings')"
+```
+
+This uses the terminal-based approval flow instead of the WebSocket/iOS UI.
+
+## Testing
+
+There are two main categories of tests in this repository.
+
+### Fast local tests
+
+Most unit tests do not require a simulator or Gemini, but they do expect the repo root on `PYTHONPATH`.
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=. pytest tests/ -q
+```
+
+### Live integration tests
+
+The following require a booted simulator with WDA:
+
+- [`tests/test_tree_reader.py`](tests/test_tree_reader.py)
+- [`tests/test_agent.py`](tests/test_agent.py)
+
+The following also require `GEMINI_API_KEY`:
+
+- [`tests/test_planner.py`](tests/test_planner.py)
+- parts of [`tests/test_memory.py`](tests/test_memory.py)
+- parts of [`tests/test_plan_preview.py`](tests/test_plan_preview.py)
+- parts of [`tests/test_router.py`](tests/test_router.py)
+
+### Current test caveats
+
+As of March 28, 2026, local test execution in this workspace revealed a few issues that are useful to know:
+
+- `pytest` must be run with `PYTHONPATH=.` or imports such as `core.*` and `server.*` fail during collection
+- [`tests/test_memory.py`](tests/test_memory.py) currently has a failing persistence expectation because `EpisodicMemory.add_lesson()` rejects very short lesson strings
+- several WebSocket endpoint tests currently fail because the installed `httpx` / `starlette` test client combination is incompatible with `TestClient`
+
+Those issues do not change the runtime architecture, but they do affect contributor expectations when running the suite.
+
+### WebSocket-specific coverage
+
+[`tests/test_ws_server.py`](tests/test_ws_server.py) exercises the current socket protocol shape, including:
+
+- task start and duplicate-task rejection
+- voice-start handling
+- stop-message unblocking behavior
+- confirmation request / response flow
+- plan preview approval flow
+
+## Configuration
+
+### Environment variables
+
+Current environment variables used directly by the code:
+
+- `GEMINI_API_KEY`: required by [`core/planner.py`](core/planner.py)
+
+### App registry and gate labels
+
+[`config/apps.json`](config/apps.json) controls:
+
+- the app routing registry
+- bundle IDs used for simulator launches
+- sensitive labels that trigger user confirmation
+
+### Ports and endpoints
+
+- WDA: `http://localhost:8100`
+- Spectra WebSocket server: `ws://localhost:8765/ws`
+
+## Known Constraints
+
+- The main supported execution target is the iOS simulator, not a physical device.
+- Spectra depends on WebDriverAgent being healthy and connected.
+- Screenshot mode exists as fallback, but the architecture is optimized for accessibility-tree-first operation.
+- The planner is Gemini-based in the current codebase; some older docs still reference Claude and are no longer authoritative.
+- The iOS client currently uses server-side voice capture from the Mac microphone in its primary home-screen flow, even though an on-device `SpeechService` also exists in the app.
+- The lightweight `scripts/start_server.sh` entrypoint does not load `.env` or alter WebSocket ping settings; for the current simulator app flow, `python scripts/run_server.py` is the more complete launcher.
+
+## Additional Documentation
+
+- Product and architecture notes: [`docs/Spectra_PRD_Complete.md`](docs/Spectra_PRD_Complete.md)
+- Internal build guide: [`docs/AGENTS.md`](docs/AGENTS.md)

@@ -1,4 +1,5 @@
 """Wrap WDA connection, tree extraction, and screenshot fallback into a single snapshot() call."""
+from __future__ import annotations
 
 import base64
 import xml.etree.ElementTree as ET

@@ -1,4 +1,5 @@
 """Task router — classifies user intent and determines target app(s)."""
+from __future__ import annotations
 
 import json
 import os

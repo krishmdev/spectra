@@ -29,6 +29,8 @@ class Executor:
             return self._go_back()
         elif action == 'go_home':
             return self._go_home()
+        elif action == 'open_app':
+            return self.open_app(params['bundle_id'])
         elif action == 'wait':
             secs = params.get('seconds', 2)
             time.sleep(secs)
@@ -83,5 +85,5 @@ class Executor:
         """Launch an app by bundle ID via simctl."""
         subprocess.run(['xcrun', 'simctl', 'launch', 'booted', bundle_id],
                        capture_output=True)
-        time.sleep(2)
+        time.sleep(1)
         return f'Opened {bundle_id}'

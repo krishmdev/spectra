@@ -1,4 +1,5 @@
 """Background runner — executes agent tasks in a separate thread."""
+from __future__ import annotations
 
 import threading
 
