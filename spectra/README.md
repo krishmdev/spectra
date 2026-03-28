@@ -120,6 +120,8 @@ The system is highly modular. Teammates addressing specific features should refe
 * `core/takeover.py`: Allow the agent to pause execution entirely (the `handoff` tool) when encountering sensitive areas like `SecureTextField` password inputs or payment sheets, resuming only when the user signifies completion.
 * `core/memory.py`: A cross-app key-value dictionary. Enables workflows requiring data transmission across different applications (e.g., comparing a price in Uber to Lyft).
 * `core/router.py`: Intent routing. Matches the natural language request to an application Bundle ID using predefined registries.
+* `core/plan_preview.py`: Generates a step-by-step reasoning plan for complex tasks, allowing user approval before the agent starts its loop.
+* `core/background.py`: Threading wrapper that allows the agent to run in the background while feeding live progress updates to a UI via callbacks.
 
 ---
 
@@ -170,9 +172,19 @@ The standardized structure expected from `planner.py` when evaluating the LLM's 
 
 ## 6. Testing and Development
 
-Before submitting pull requests to core modules, verify the following baseline functionality:
+Before submitting pull requests, run the comprehensive test suite to verify baseline functionality:
 
-1. **Parser Verification**: Run `tree_parser.py` against a standard iOS Settings view XML dump. Ensure the output token length is < 500, all refs are sequential, and zero-dimensional objects are pruned.
-2. **Fallback Verification**: Pass a Canvas or OpenGL view to `tree_reader.py`. Confirm that `perception_mode` correctly toggles to `screenshot` and a valid base64 PNG string is returned.
-3. **Execution Accuracy**: Within `executor.py`, verify that `scroll down` correctly executes a WDA `swipe_up()` gesture (iOS scrolling is counter-intuitive relative to gesture direction).
-4. **Agent Integration**: Run `agent.py` with a simple command like *"Turn on Airplane Mode"* to confirm the full observer-think-act chain executes linearly to a `done` state.
+```bash
+# Run all core tests
+pytest tests/
+```
+
+**Key Test Files:**
+* `tests/test_tree_parser.py`: Verifies XML pruning and token compression.
+* `tests/test_tree_reader.py`: Verifies WDA connection and screenshot fallback logic.
+* `tests/test_planner.py`: Verifies Gemini API communication and tool-call schema.
+* `tests/test_memory.py`: Verifies cross-app data persistence.
+* `tests/test_gates.py`: Verifies confirmation interception for sensitive labels.
+* `tests/test_router.py`: Verifies app bundle ID matching.
+* `tests/test_takeover.py`: Verifies user handoff logic.
+
