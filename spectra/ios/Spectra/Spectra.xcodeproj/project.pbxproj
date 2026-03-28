@@ -22,6 +22,7 @@
 		AA00000D /* ResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB00000D; };
 		AA00000E /* AskUserRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB00000F; };
 		AA00000F /* AskUserSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000010; };
+		AA000010 /* VoiceInputSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000011; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +42,7 @@
 		AB00000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AB00000F /* AskUserRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserRequest.swift; sourceTree = "<group>"; };
 		AB000010 /* AskUserSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserSheet.swift; sourceTree = "<group>"; };
+		AB000011 /* VoiceInputSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputSection.swift; sourceTree = "<group>"; };
 		AC000001 /* Spectra.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spectra.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -110,6 +112,7 @@
 			isa = PBXGroup;
 			children = (
 				AB00000A /* HomeView.swift */,
+				AB000011 /* VoiceInputSection.swift */,
 				AB00000B /* TaskRunningView.swift */,
 				AB00000C /* ConfirmationSheet.swift */,
 				AB00000D /* ResultView.swift */,
@@ -209,6 +212,7 @@
 				AA00000D /* ResultView.swift in Sources */,
 				AA00000E /* AskUserRequest.swift in Sources */,
 				AA00000F /* AskUserSheet.swift in Sources */,
+				AA000010 /* VoiceInputSection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

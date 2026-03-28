@@ -3,12 +3,11 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var ws: WebSocketService
     @State private var inputText = ""
-    @State private var navigateToTask = false
+    @State private var navPath = NavigationPath()
     @State private var taskHistory: [CompletedTask] = []
-    @State private var currentTask = ""
-
+    
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             VStack(spacing: 0) {
                 // Header
                 VStack(spacing: 2) {
@@ -32,70 +31,20 @@ struct HomeView: View {
 
                 Spacer()
 
-                // Prompt
                 Text("What can I help you with?")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                    .padding(.bottom, 12)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
 
-                // Mic button — triggers server-side voice capture on Mac
-                Button {
-                    if ws.isVoiceListening {
-                        ws.sendVoiceStop()
-                    } else {
-                        ws.sendVoiceStart()
-                    }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(DS.primary)
-                            .frame(width: DS.micSize, height: DS.micSize)
-                            .scaleEffect(ws.isVoiceListening ? 1.15 : 1.0)
-                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: ws.isVoiceListening)
-
-                        Image(systemName: ws.isVoiceListening ? "waveform" : "mic.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                    }
-                }
-                .padding(.bottom, 12)
-
-                // Voice status
-                if ws.isVoiceListening {
-                    Text("Listening on Mac mic...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 4)
-                } else if let err = ws.voiceError {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(DS.danger)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 4)
-                }
-
-                // Text input
-                HStack(spacing: 8) {
-                    TextField("Type a task...", text: $inputText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(height: 44)
-                        .onSubmit { submitTask() }
-
-                    Button { submitTask() } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(DS.primary)
-                    }
-                    .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
+                VoiceInputSection(inputText: $inputText, onSubmit: submitTask)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
             }
-            .navigationDestination(isPresented: $navigateToTask) {
-                TaskRunningView(taskName: currentTask)
-                    .environmentObject(ws)
+            .navigationDestination(for: String.self) { taskName in
+                TaskRunningView(taskName: taskName, onNewTask: {
+                    navPath = NavigationPath()
+                })
+                .environmentObject(ws)
             }
             .onChange(of: ws.voiceTranscript) { _, transcript in
                 if let transcript = transcript, !transcript.isEmpty {
@@ -124,10 +73,9 @@ struct HomeView: View {
     private func submitTask() {
         let task = inputText.trimmingCharacters(in: .whitespaces)
         guard !task.isEmpty else { return }
-        currentTask = task
         inputText = ""
         ws.sendCommand(task)
-        navigateToTask = true
+        navPath.append(task)
     }
 }
 

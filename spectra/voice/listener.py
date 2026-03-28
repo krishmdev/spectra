@@ -33,10 +33,14 @@ class VoiceListener:
 
     def listen_and_transcribe(
         self,
-        timeout: float = 8.0,
-        phrase_time_limit: float = 15.0,
+        timeout: float = 30.0,
+        phrase_time_limit: float = 60.0,
     ) -> dict:
         """Record from the default microphone until silence, then transcribe.
+
+        ``timeout`` is how long to wait for speech to *start* (SpeechRecognition).
+        ``phrase_time_limit`` caps the length of one utterance. Server passes
+        values from ``VOICE_TIMEOUT`` / ``VOICE_PHRASE_LIMIT`` when used from ws_server.
 
         Returns:
             {"success": True, "transcript": "..."} or

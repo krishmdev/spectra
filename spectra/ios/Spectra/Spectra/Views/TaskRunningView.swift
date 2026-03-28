@@ -2,16 +2,22 @@ import SwiftUI
 
 struct TaskRunningView: View {
     let taskName: String
+    /// Pop all the way back to home (used from result “New task”).
+    var onNewTask: () -> Void = {}
     @EnvironmentObject var ws: WebSocketService
     @Environment(\.dismiss) private var dismiss
     @State private var showResult = false
 
-    private var badge: (String, Color, Color) {
-        if ws.taskResult != nil { return ("Done", DS.success.opacity(0.15), DS.success) }
-        if ws.confirmationRequest != nil || ws.handoffRequest != nil {
-            return ("Waiting", DS.warningLight, DS.warningBadgeText)
-        }
-        return ("Running", DS.warningLight, DS.warningBadgeText)
+    private var statusLabel: String {
+        if ws.taskResult != nil { return "Done" }
+        if ws.confirmationRequest != nil || ws.handoffRequest != nil { return "Waiting" }
+        return "Running"
+    }
+
+    private var statusAccent: Color {
+        if ws.taskResult != nil { return DS.success }
+        if ws.confirmationRequest != nil || ws.handoffRequest != nil { return DS.warning }
+        return DS.primary
     }
 
     private var currentStep: Int {
@@ -76,9 +82,10 @@ struct TaskRunningView: View {
                     Image(systemName: "chevron.left")
                         .fontWeight(.semibold)
                 }
+                .accessibilityLabel("Back")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                StatusBadge(text: badge.0, bg: badge.1, fg: badge.2)
+                taskStatusIndicator
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -120,9 +127,29 @@ struct TaskRunningView: View {
             }
         }
         .navigationDestination(isPresented: $showResult) {
-            ResultView()
+            ResultView(onNewTask: onNewTask)
                 .environmentObject(ws)
         }
+    }
+
+    /// Compact, fixed-layout status — avoids toolbar shifting when the label changes.
+    private var taskStatusIndicator: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(statusAccent)
+                .frame(width: 7, height: 7)
+            Text(statusLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(statusAccent)
+                .frame(width: 56, alignment: .leading)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(statusAccent.opacity(0.12))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Task status: \(statusLabel)")
     }
 
     private func stepStatus(for step: Int) -> StepStatus {
@@ -140,21 +167,6 @@ private struct SectionHeader: View {
         Text(title.uppercased())
             .font(.caption).fontWeight(.semibold)
             .foregroundStyle(.secondary)
-    }
-}
-
-private struct StatusBadge: View {
-    let text: String
-    let bg: Color
-    let fg: Color
-    var body: some View {
-        Text(text)
-            .font(.caption2).fontWeight(.semibold)
-            .foregroundStyle(fg)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(bg)
-            .clipShape(Capsule())
     }
 }
 

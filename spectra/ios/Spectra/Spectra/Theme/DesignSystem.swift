@@ -17,6 +17,9 @@ enum DS {
     static let buttonRadius: CGFloat = 12
     static let pillRadius: CGFloat = 8
     static let micSize: CGFloat = 56
+    /// Outer tap target / pulse ring for the voice control.
+    static let voiceMicOuter: CGFloat = 76
+    static let speechCardRadius: CGFloat = 20
     static let stepIndicatorSize: CGFloat = 18
 }
 

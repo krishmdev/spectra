@@ -2,7 +2,8 @@ import SwiftUI
 
 struct ResultView: View {
     @EnvironmentObject var ws: WebSocketService
-    @Environment(\.dismiss) private var dismiss
+    /// Pops the whole task flow so home is visible again.
+    var onNewTask: () -> Void = {}
 
     private var result: TaskResult? { ws.taskResult }
     private var success: Bool { result?.success ?? false }
@@ -50,9 +51,9 @@ struct ResultView: View {
 
             Spacer()
 
-            // New task button
+            // New task button — pop entire task stack back to home
             Button {
-                dismiss()
+                onNewTask()
             } label: {
                 Text("New task")
                     .fontWeight(.semibold)

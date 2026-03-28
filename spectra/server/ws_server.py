@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
 import time
 
@@ -175,15 +176,29 @@ class ConnectionState:
 # Voice capture (runs in a background thread on the Mac)
 # ---------------------------------------------------------------------------
 
+def _voice_listen_params() -> tuple[float, float]:
+    """SpeechRecognition limits — see voice/listener.py.
+
+    VOICE_TIMEOUT: max seconds to wait for speech to *start* after the mic opens
+      (was 8s — easy to hit if you pause before speaking).
+    VOICE_PHRASE_LIMIT: max seconds for one utterance after speech begins
+      (long requests like directions need more than 15s).
+    """
+    t = float(os.environ.get('VOICE_TIMEOUT', '30'))
+    p = float(os.environ.get('VOICE_PHRASE_LIMIT', '60'))
+    return t, p
+
+
 def _voice_listen_thread(state: ConnectionState) -> None:
     """Record from the Mac's microphone and transcribe with faster-whisper."""
     try:
         from voice.listener import get_listener
         state.send({'type': 'voice_listening'})
-        print('[ws] Voice: listening on Mac mic...')
+        timeout, phrase_limit = _voice_listen_params()
+        print(f'[ws] Voice: listening on Mac mic... (timeout={timeout}s, phrase_limit={phrase_limit}s)')
 
         listener = get_listener()
-        result = listener.listen_and_transcribe(timeout=8.0, phrase_time_limit=15.0)
+        result = listener.listen_and_transcribe(timeout=timeout, phrase_time_limit=phrase_limit)
 
         if result['success']:
             print(f'[ws] Voice transcript: {result["transcript"]}')
