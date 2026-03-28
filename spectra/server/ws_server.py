@@ -210,8 +210,83 @@ def _run_task_in_thread(
     """Execute the full route → plan → agent flow in a thread."""
     import traceback
     print(f"[ws] Task thread started: {task!r}")
+    recorder = None
     try:
+        from recorder.recorder import Recorder
+        safe_task = "".join(c if c.isalnum() else "_" for c in task)[:40]
+        filename = f"flows/{int(time.time())}_{safe_task}.spectra"
+        recorder = Recorder(filename, task=task)
+
         planner = Planner()
+
+        # 0. Check for exact saved workflow to fast-forward
+        from core.workflow_matcher import find_matching_workflow
+        print("[ws] Checking for matching workflow...")
+        match_id = find_matching_workflow(task, planner)
+        if match_id:
+            print(f"[ws] Found exact match: {match_id}. Fast-forwarding.")
+            state.send({
+                'type': 'status',
+                'step': 0,
+                'total': 0,
+                'action': 'fast_forward',
+                'detail': 'Found exact saved workflow — fast-forwarding...',
+                'app': 'Spectra',
+            })
+            
+            def replay_callback(step, total, action, success, detail):
+                state.send({
+                    'type': 'status',
+                    'step': step,
+                    'total': total,
+                    'action': action,
+                    'detail': f"{'✅' if success else '❌'} {detail}",
+                    'app': '',
+                })
+                
+            from recorder.replayer import Replayer
+            replayer = Replayer(match_id, wda_url=wda_url, step_delay=0.4)
+            report = replayer.run(step_callback=replay_callback)
+            
+            if report.failed == 0:
+                print(f"[ws] Replay successful ({report.passed} steps).")
+                # Bring app back to foreground and send done
+                time.sleep(0.5)
+                try:
+                    import subprocess
+                    subprocess.run(
+                        ['xcrun', 'simctl', 'launch', 'booted', 'com.spectra.agent'],
+                        capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
+                state.send({
+                    'type': 'done',
+                    'success': True,
+                    'summary': f'Completed via fast-forward replay: {task}',
+                    'steps': report.passed,
+                    'duration': round(report.duration, 1),
+                })
+                # Delete the empty recorder file we just created for this run
+                if recorder:
+                    recorder.close()
+                    import os
+                    try:
+                        os.remove(recorder._filepath)
+                    except Exception:
+                        pass
+                    recorder = None
+                return
+            else:
+                print(f"[ws] Replay failed at a step ({report.failed} failures). Resuming with LLM agent.")
+                state.send({
+                    'type': 'status',
+                    'step': 0,
+                    'total': 0,
+                    'action': 'fallback',
+                    'detail': 'Screen structure shifted or drifted. Falling back to intelligent LLM execution...',
+                    'app': 'Spectra',
+                })
         router = TaskRouter(planner)
         executor = Executor(wda_url)
 
@@ -260,8 +335,10 @@ def _run_task_in_thread(
         t_start = time.monotonic()
         step_counter = [0]
 
-        def step_callback(step, total, action_name, action_input, result, current_app):
+        def step_callback(step, total, action_name, action_input, result, current_app, ref_map, tree):
             step_counter[0] = step
+            if recorder:
+                recorder.record(step, action_name, action_input, ref_map, tree)
             detail = action_input.get('reasoning', action_input.get('summary', ''))
             state.send({
                 'type': 'status',
@@ -338,6 +415,8 @@ def _run_task_in_thread(
         traceback.print_exc()
         state.send({'type': 'error', 'message': str(e)})
     finally:
+        if recorder:
+            recorder.close()
         print("[ws] Task thread finished")
         state.task_running = False
 

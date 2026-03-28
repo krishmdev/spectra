@@ -89,7 +89,7 @@ def run_agent(
         stop_check: Callable returning True to stop the loop (for BackgroundRunner).
         gate: ConfirmationGate instance (injectable for WebSocket server).
         takeover: TakeoverManager instance (injectable for WebSocket server).
-        step_callback: Optional callable(step, action_name, action_input, result) per step.
+        step_callback: Optional callable(step, max_steps, action_name, action_input, result, current_app, ref_map, tree) per step.
 
     Returns:
         True if task completed (done), False if stuck or timed out
@@ -171,7 +171,7 @@ def run_agent(
             snap_pool.shutdown(wait=False)
             elapsed = time.monotonic() - t_start
             if step_callback:
-                step_callback(step, max_steps, 'done', {'summary': 'Task likely completed but agent got stuck in a loop'}, 'forced done', current_app)
+                step_callback(step, max_steps, 'done', {'summary': 'Task likely completed but agent got stuck in a loop'}, 'forced done', current_app, ref_map, tree)
             _reflect_and_store(planner, episodic, task, history, 'loop', current_app, verbose)
             return True  # assume task was completed since actions were executing
 
@@ -181,16 +181,19 @@ def run_agent(
         # --- Think ---
         t_think = time.monotonic()
         if metadata['perception_mode'] == 'screenshot':
-            action = planner.next_action_vision(
-                screenshot_b64=metadata['screenshot_b64'],
-                tree=tree,
-                task=task,
-                history=history,
-                metadata=metadata,
-                warning=warning,
-                memory=combined_memory,
-                plan=plan_steps,
-            )
+            if metadata.get('screenshot_b64') is None:
+                action = {'name': 'stuck', 'input': {'reason': 'Lost connection to WDA on iOS Simulator (screenshot failed).'}}
+            else:
+                action = planner.next_action_vision(
+                    screenshot_b64=metadata['screenshot_b64'],
+                    tree=tree,
+                    task=task,
+                    history=history,
+                    metadata=metadata,
+                    warning=warning,
+                    memory=combined_memory,
+                    plan=plan_steps,
+                )
         else:
             action = planner.next_action(
                 tree=tree,
@@ -280,7 +283,7 @@ def run_agent(
                 history.append(f'CHECKPOINT: verify {checkpoint}')
             if step_callback:
                 detail = checkpoint or f'batch of {len(actions)} actions'
-                step_callback(step, max_steps, 'batch', {'reasoning': detail}, '; '.join(results), current_app)
+                step_callback(step, max_steps, 'batch', {'reasoning': detail}, '; '.join(results), current_app, ref_map, tree)
             detector.record(tree, 'batch', None)
             last_action_was_no_ui = False
             sleep_time = _ACTION_SLEEP.get(actions[-1].get('action', ''), 0.3) if actions else 0.3
@@ -303,7 +306,7 @@ def run_agent(
             print(f'    → {result}')
 
         if step_callback:
-            step_callback(step, max_steps, action_name, action_input, result, current_app)
+            step_callback(step, max_steps, action_name, action_input, result, current_app, ref_map, tree)
 
         # On ref errors, invalidate cache+prefetch so next step gets a fresh snapshot
         if 'ref' in str(result).lower() and 'not found' in str(result).lower():
