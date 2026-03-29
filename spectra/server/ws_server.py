@@ -36,6 +36,27 @@ from core.takeover import TakeoverManager
 
 app = FastAPI(title='Spectra WebSocket Server')
 
+
+def _send_sim_push(title: str, body: str, bundle_id: str = 'com.spectra.agent'):
+    """Send a push notification to the booted iOS simulator via xcrun simctl."""
+    import subprocess, tempfile
+    payload = json.dumps({
+        'aps': {
+            'alert': {'title': f'Spectra — {title}', 'body': body},
+            'sound': 'default',
+        }
+    })
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write(payload)
+            f.flush()
+            subprocess.run(
+                ['xcrun', 'simctl', 'push', 'booted', bundle_id, f.name],
+                capture_output=True, timeout=5,
+            )
+    except Exception as e:
+        print(f"[ws] Push notification failed: {e}", flush=True)
+
 # Global observer reference so we can wire ws_state when a client connects
 _observer = None
 
@@ -472,16 +493,16 @@ def _run_task_in_thread(
         elapsed = time.monotonic() - t_start
         memory.clear()
 
-        # Send result FIRST so the app receives it before being brought to foreground
         if state.stop_event.is_set():
             state.send({'type': 'done', 'success': False, 'summary': 'Stopped by user', 'steps': 0, 'duration': round(elapsed, 1)})
+            _send_sim_push('Stopped', 'Task was stopped by user.')
         elif success:
-            state.send({'type': 'done', 'success': True, 'summary': f'Completed: {task}', 'steps': step_counter[0], 'duration': round(elapsed, 1)})
+            summary = f'Completed: {task}'
+            state.send({'type': 'done', 'success': True, 'summary': summary, 'steps': step_counter[0], 'duration': round(elapsed, 1)})
+            _send_sim_push('Task Complete', f'{summary} ({step_counter[0]} steps, {round(elapsed, 1)}s)')
         else:
             state.send({'type': 'stuck', 'reason': 'Agent could not complete the task'})
-
-        # Don't bring Spectra back — let the user stay where they are.
-        # The iOS app will show a push notification that the task is done.
+            _send_sim_push('Task Stuck', 'Agent could not complete the task.')
 
     except Exception as e:
         print(f"[ws] ERROR in task thread: {e}")

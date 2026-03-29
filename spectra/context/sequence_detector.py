@@ -18,6 +18,24 @@ SUGGESTION_COOLDOWN_S = 300
 SESSION_GAP_S = 120
 _NOISE_VERBS = frozenset(['scrolled'])
 
+_PRUNE_PROMPT = """You are reviewing a list of learned user workflows on an iOS device. Each workflow has an ID, a WHEN (trigger state), and a THEN (goal action).
+
+Workflows:
+{workflows}
+
+Your job: identify which workflows to KEEP. A workflow is worth keeping if:
+- It represents a distinct, meaningful user intent (not just "opened app X")
+- It has a clear goal that an AI agent could actually execute
+- It is not a near-duplicate of another workflow (if two are similar, keep the more specific one)
+
+A workflow should be REMOVED if:
+- It's trivial (e.g., "Opened Safari" → "Opened Reminders" with no specific content)
+- It's a duplicate or subset of another workflow
+- The goal is too vague to be actionable
+- It's just noise from random app-switching
+
+Return ONLY the IDs to KEEP, one per line. Nothing else — no explanation, no markdown."""
+
 
 def _actions_to_state(actions: list[str]) -> str:
     """Convert a list of raw action strings into a readable state description.
@@ -76,6 +94,13 @@ def _actions_to_state(actions: list[str]) -> str:
 class SequenceDetector:
     def __init__(self, action_log: ActionLog):
         self.log = action_log
+        self._planner = None
+
+    def _get_planner(self):
+        if self._planner is None:
+            from core.planner import Planner
+            self._planner = Planner()
+        return self._planner
 
     def learn_sequences(self) -> int:
         """Scan action log for sessions. Split each session into
@@ -187,6 +212,60 @@ class SequenceDetector:
                         }
 
         return best_match
+
+    def prune_workflows(self) -> int:
+        """Send all workflows to the LLM, keep only distinct useful ones.
+        Returns number of workflows removed."""
+        sequences = self.log.get_all_sequences()
+        if len(sequences) < 2:
+            return 0  # nothing to prune
+
+        # Build the prompt listing all workflows
+        lines = []
+        for seq in sequences:
+            initial = seq.get('initial_state') or 'Unknown'
+            goal = seq.get('goal_state') or 'Unknown'
+            lines.append(f"ID: {seq['id']}\n  WHEN: {initial}\n  THEN: {goal}")
+        workflows_text = "\n\n".join(lines)
+
+        try:
+            planner = self._get_planner()
+            prompt = _PRUNE_PROMPT.format(workflows=workflows_text)
+
+            from google.genai import types
+            config = types.GenerateContentConfig(
+                max_output_tokens=500,
+                temperature=0.0,
+            )
+            res = planner.client.models.generate_content(
+                model=planner.model,
+                contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
+                config=config,
+            )
+            response_text = res.text.strip()
+
+            # Parse the IDs to keep
+            keep_ids = set()
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line:
+                    keep_ids.add(line)
+
+            # Delete workflows not in the keep set
+            removed = 0
+            for seq in sequences:
+                if seq['id'] not in keep_ids:
+                    self.log.delete_sequence(seq['id'])
+                    removed += 1
+                    print(f"[SequenceDetector] Pruned: [{seq.get('initial_state', '?')}] → [{seq.get('goal_state', '?')}]", flush=True)
+
+            if removed > 0:
+                print(f"[SequenceDetector] Pruned {removed} workflows, kept {len(sequences) - removed}", flush=True)
+            return removed
+
+        except Exception as e:
+            print(f"[SequenceDetector] Prune error: {e}", flush=True)
+            return 0
 
     def _split_sessions(self, actions) -> list:
         if not actions:

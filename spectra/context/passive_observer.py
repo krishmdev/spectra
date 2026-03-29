@@ -20,6 +20,9 @@ from context.inference_engine import infer_spectra_flow
 # How often to re-scan the action log for new sequences
 LEARN_INTERVAL_POLLS = 3  # every ~30s at 10s polling
 
+# How often to prune/condense workflows via LLM
+PRUNE_INTERVAL_POLLS = 3  # every ~30s at 10s polling
+
 
 class PassiveObserver:
     def __init__(self, wda_url='http://localhost:8100', ws_state=None):
@@ -54,6 +57,10 @@ class PassiveObserver:
         # --- Periodic sequence learning (runs regardless of snapshot success) ---
         if self._poll_count % LEARN_INTERVAL_POLLS == 0:
             await self._learn_sequences()
+
+        # --- Periodic workflow pruning ---
+        if self._poll_count % PRUNE_INTERVAL_POLLS == 0:
+            await self._prune_workflows()
 
         # --- Snapshot ---
         loop = asyncio.get_running_loop()
@@ -123,6 +130,17 @@ class PassiveObserver:
             import traceback
             print(f"[Observer] Sequence learning error: {e}", flush=True)
             traceback.print_exc()
+
+    async def _prune_workflows(self):
+        loop = asyncio.get_running_loop()
+        def _prune():
+            return self.detector.prune_workflows()
+        try:
+            removed = await loop.run_in_executor(None, _prune)
+            if removed > 0:
+                print(f"[Observer] Pruned {removed} workflows", flush=True)
+        except Exception as e:
+            print(f"[Observer] Prune error: {e}", flush=True)
 
     async def _check_sequence(self):
         loop = asyncio.get_running_loop()
