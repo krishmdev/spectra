@@ -7,6 +7,7 @@ struct TaskRunningView: View {
     @EnvironmentObject var ws: WebSocketService
     @Environment(\.dismiss) private var dismiss
     @State private var showResult = false
+    @State private var isPulsing = false
 
     private var statusLabel: String {
         if ws.taskResult != nil { return "Done" }
@@ -25,69 +26,79 @@ struct TaskRunningView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Plan section
-                    if let plan = ws.planPreview {
-                        SectionHeader(title: "Plan")
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(plan.steps.enumerated()), id: \.offset) { idx, step in
-                                PlanStepRow(
-                                    index: idx + 1,
-                                    text: step,
-                                    status: stepStatus(for: idx + 1)
-                                )
-                            }
-                        }
-                    }
-
-                    // Memory section
-                    if !ws.memoryItems.isEmpty {
-                        SectionHeader(title: "Memory")
-                        FlowLayout(spacing: 8) {
-                            ForEach(ws.memoryItems) { item in
-                                MemoryPill(item: item)
-                            }
-                        }
-                    }
-
-                    // Live actions
-                    SectionHeader(title: "Live actions")
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(ws.statusHistory.reversed()) { status in
-                            HStack(spacing: 8) {
-                                Text("Step \(status.step)")
-                                    .font(.caption2)
-                                    .foregroundStyle(DS.success)
-                                    .frame(width: 44, alignment: .leading)
-                                Text("\(status.action): \(status.detail)")
-                                    .font(.caption)
-                                    .lineLimit(1)
-                            }
-                            .id(status.id)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-            }
-        }
-        .navigationTitle(taskName)
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+        VStack(spacing: 0) {
+            // Custom Navigation Bar supporting multi-line wrapping
+            HStack(alignment: .top, spacing: 12) {
                 Button { dismiss() } label: {
                     Image(systemName: "chevron.left")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
                 }
+                .padding(.top, 2)
                 .accessibilityLabel("Back")
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
+
+                Text(taskName)
+                    .font(.headline)
+                    .lineLimit(nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
                 taskStatusIndicator
+                    .padding(.top, 6)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Plan section
+                        if let plan = ws.planPreview {
+                            SectionHeader(title: "Plan")
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(plan.steps.enumerated()), id: \.offset) { idx, step in
+                                    PlanStepRow(
+                                        index: idx + 1,
+                                        text: step,
+                                        status: stepStatus(for: idx + 1)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Memory section
+                        if !ws.memoryItems.isEmpty {
+                            SectionHeader(title: "Memory")
+                            FlowLayout(spacing: 8) {
+                                ForEach(ws.memoryItems) { item in
+                                    MemoryPill(item: item)
+                                }
+                            }
+                        }
+
+                        // Live actions
+                        SectionHeader(title: "Live actions")
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(ws.statusHistory.reversed()) { status in
+                                HStack(spacing: 8) {
+                                    Text("Step \(status.step)")
+                                        .font(.caption2)
+                                        .foregroundStyle(DS.success)
+                                        .frame(width: 44, alignment: .leading)
+                                    Text("\(status.action): \(status.detail)")
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                }
+                                .id(status.id)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                }
             }
         }
+        .navigationBarHidden(true)
         .safeAreaInset(edge: .bottom) {
             if ws.taskResult == nil {
                 Button {
@@ -132,24 +143,19 @@ struct TaskRunningView: View {
         }
     }
 
-    /// Compact, fixed-layout status — avoids toolbar shifting when the label changes.
+    /// Flashing dot indicator
     private var taskStatusIndicator: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(statusAccent)
-                .frame(width: 7, height: 7)
-            Text(statusLabel)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(statusAccent)
-                .frame(width: 56, alignment: .leading)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(statusAccent.opacity(0.12))
-        .clipShape(Capsule())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Task status: \(statusLabel)")
+        Circle()
+            .fill(statusAccent)
+            .frame(width: 10, height: 10)
+            .scaleEffect(isPulsing && ws.taskResult == nil ? 1.4 : 1.0)
+            .opacity(isPulsing && ws.taskResult == nil ? 0.4 : 1.0)
+            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
+            .onAppear {
+                isPulsing = true
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Task status: \(statusLabel)")
     }
 
     private func stepStatus(for step: Int) -> StepStatus {
