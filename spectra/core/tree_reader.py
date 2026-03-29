@@ -2,18 +2,42 @@
 from __future__ import annotations
 
 import base64
-import xml.etree.ElementTree as ET
-
 import wda
-
+import threading
 from core.tree_parser import parse_tree
+
+_WDA_SOURCE_TIMEOUT = 2.5
+
+def _source_with_timeout(client, timeout=_WDA_SOURCE_TIMEOUT):
+    """Enforce a hard wall-clock timeout on WDA client.source()."""
+    result = [None]
+    exc = [None]
+    def _call():
+        try:
+            result[0] = client.source()
+        except Exception as e:
+            exc[0] = e
+    t = threading.Thread(target=_call, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise TimeoutError(f'WDA source() timed out after {timeout}s - WDA may be degraded')
+    if exc[0]:
+        raise exc[0]
+    return result[0]
 
 
 class TreeReader:
     """Observe the iOS screen via WDA and return a compact tree or screenshot fallback."""
 
-    def __init__(self, wda_url: str = 'http://localhost:8100'):
-        self.client = wda.Client(wda_url)
+    def __init__(self, wda_url='http://localhost:8100', client=None):
+        self.client = client if client is not None else wda.Client(wda_url)
+        if client is None:
+            try:
+                self.client.http.timeout = 5
+            except AttributeError:
+                pass
+        self._degraded_count = 0
 
     def snapshot(self) -> tuple[str, dict, dict]:
         """Capture the current screen state.
@@ -25,9 +49,15 @@ class TreeReader:
                       perception_mode ('tree' or 'screenshot'), and screenshot_b64.
         """
         try:
-            raw = self.client.source()
+            raw = _source_with_timeout(self.client)
+            self._degraded_count = 0
         except Exception:
             # WDA failure — full screenshot fallback
+            self._degraded_count += 1
+            if self._degraded_count >= 2:
+                print('[WDA] source() timed out repeatedly — consider restarting WDA')
+                self._degraded_count = 0
+            
             screenshot_b64 = self._try_screenshot()
             metadata = {
                 'app_name': '',
@@ -39,11 +69,10 @@ class TreeReader:
             return '[screenshot mode - tree unavailable]', {}, metadata
 
         # Extract metadata from the raw XML before parsing
-        app_name = self._extract_app_name(raw)
         keyboard_visible = 'XCUIElementTypeKeyboard' in raw
         alert_present = 'XCUIElementTypeAlert' in raw
 
-        compact, ref_map = parse_tree(raw)
+        compact, ref_map, app_name = parse_tree(raw)
 
         # Sparse tree fallback: fewer than 3 interactive elements
         if len(ref_map) < 3:
@@ -74,12 +103,3 @@ class TreeReader:
             return base64.b64encode(png_data).decode('utf-8')
         except Exception:
             return None
-
-    @staticmethod
-    def _extract_app_name(xml_string: str) -> str:
-        """Pull the app name from the root XCUIElementTypeApplication element."""
-        try:
-            root = ET.fromstring(xml_string)
-            return root.get('name', '') or root.get('label', '') or ''
-        except ET.ParseError:
-            return ''

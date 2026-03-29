@@ -46,7 +46,7 @@ class TestBasicSettingsScreen:
     ''')
 
     def test_output_format(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         lines = text.strip().split('\n')
         assert lines[0] == '[1] NavBar "Settings"'
         assert lines[1] == '[2] Cell "Wi-Fi" \u2192 "Connected"'
@@ -55,11 +55,11 @@ class TestBasicSettingsScreen:
         assert lines[4] == '[5] Switch "Airplane Mode" \u2192 "0" [disabled]'
 
     def test_sequential_refs(self):
-        _, ref_map = parse_tree(self.XML)
+        _, ref_map, _app = parse_tree(self.XML)
         assert list(ref_map.keys()) == [1, 2, 3, 4, 5]
 
     def test_ref_map_count(self):
-        _, ref_map = parse_tree(self.XML)
+        _, ref_map, _app = parse_tree(self.XML)
         assert len(ref_map) == 5
 
 
@@ -78,7 +78,7 @@ class TestSkipStatusBar:
     ''')
 
     def test_statusbar_skipped(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert 'Signal' not in text
         assert 'StatusBar' not in text
         assert len(ref_map) == 1
@@ -102,7 +102,7 @@ class TestSkipInvisible:
     ''')
 
     def test_invisible_kept_elements_skipped(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert 'Hidden' not in text
         assert len(ref_map) == 1
         assert ref_map[1]['label'] == 'Visible'
@@ -124,7 +124,7 @@ class TestInvisibleContainerWithVisibleChildren:
     ''')
 
     def test_visible_child_surfaces(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert 'DeepVisible' in text
         assert len(ref_map) == 1
         assert ref_map[1]['label'] == 'DeepVisible'
@@ -144,7 +144,7 @@ class TestTransparentContainers:
     ''')
 
     def test_containers_transparent(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert 'Other' not in text
         assert 'Group' not in text
         assert 'DeepButton' in text
@@ -164,7 +164,7 @@ class TestValueDiffersFromLabel:
     ''')
 
     def test_same_value_hidden(self):
-        text, _ = parse_tree(self.XML)
+        text, _, _app = parse_tree(self.XML)
         lines = text.strip().split('\n')
         # Volume == Volume, so no arrow
         assert '\u2192' not in lines[0]
@@ -187,7 +187,7 @@ class TestDisabledAndSelectedFlags:
     ''')
 
     def test_flags(self):
-        text, _ = parse_tree(self.XML)
+        text, _, _app = parse_tree(self.XML)
         lines = text.strip().split('\n')
         assert '[disabled]' in lines[0]
         assert '[selected]' in lines[1]
@@ -205,7 +205,7 @@ class TestRefMapStructure:
     ''')
 
     def test_keys_and_types(self):
-        _, ref_map = parse_tree(self.XML)
+        _, ref_map, _app = parse_tree(self.XML)
         entry = ref_map[1]
         assert entry['type'] == 'XCUIElementTypeButton'
         assert entry['label'] == 'OK'
@@ -225,7 +225,7 @@ class TestEmptyXml:
     XML = _wrap('')
 
     def test_empty(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert text == ''
         assert ref_map == {}
 
@@ -246,7 +246,7 @@ class TestIndentationInsideStructural:
     ''')
 
     def test_children_indented(self):
-        text, _ = parse_tree(self.XML)
+        text, _, _app = parse_tree(self.XML)
         lines = text.strip().split('\n')
         assert lines[0] == '[1] Alert "Delete?"'
         assert lines[1] == '  [2] Button "Cancel"'
@@ -268,7 +268,7 @@ class TestKeyboardSkipped:
     ''')
 
     def test_keyboard_absent(self):
-        text, ref_map = parse_tree(self.XML)
+        text, ref_map, _app = parse_tree(self.XML)
         assert 'Keyboard' not in text
         assert 'Key' not in text.split('"')  # avoid matching inside quoted labels
         assert len(ref_map) == 1

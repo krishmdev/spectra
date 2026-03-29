@@ -9,8 +9,13 @@ import wda
 class Executor:
     """Execute actions on the iOS simulator via WDA."""
 
-    def __init__(self, wda_url: str = 'http://localhost:8100'):
-        self.client = wda.Client(wda_url)
+    def __init__(self, wda_url='http://localhost:8100', client=None):
+        self.client = client if client is not None else wda.Client(wda_url)
+        if client is None:
+            try:
+                self.client.http.timeout = 5
+            except AttributeError:
+                pass
 
     def run(self, action: str, params: dict, ref_map: dict) -> str:
         """Dispatch a planner action to the appropriate WDA command.
@@ -62,7 +67,7 @@ class Executor:
 
     def _type(self, ref: int, text: str, ref_map: dict) -> str:
         self._tap(ref, ref_map)
-        time.sleep(0.3)
+        time.sleep(0.1)
         self.client.send_keys(text)
         return f"Typed '{text}' into [{ref}]"
 
@@ -89,7 +94,9 @@ class Executor:
                 return f'{bundle_id} already in foreground'
         except Exception:
             pass
-        subprocess.run(['xcrun', 'simctl', 'launch', 'booted', bundle_id],
-                       capture_output=True)
+        result = subprocess.run(['xcrun', 'simctl', 'launch', 'booted', bundle_id],
+                               capture_output=True, text=True)
+        if result.returncode != 0:
+            return f'Error: {bundle_id} is not installed on this device. Use Safari or another installed app instead.'
         time.sleep(1)
         return f'Opened {bundle_id}'

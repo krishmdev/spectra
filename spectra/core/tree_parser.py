@@ -117,8 +117,8 @@ def _walk(element, depth, counter, lines, ref_map):
         _walk(child, child_depth, counter, lines, ref_map)
 
 
-def parse_tree(xml_string: str) -> tuple[str, dict]:
-    """Parse WDA XML into compact ref-tagged text and a ref map.
+def parse_tree(xml_string: str) -> tuple[str, dict, str]:
+    """Parse WDA XML into compact ref-tagged text, a ref map, and the app name.
 
     Args:
         xml_string: Raw XML from WDA source()
@@ -126,8 +126,11 @@ def parse_tree(xml_string: str) -> tuple[str, dict]:
     Returns:
         compact_text: Human-readable ref-tagged text
         ref_map: Dict mapping ref number -> {type, label, value, x, y, width, height}
+        app_name: Name of the application extracted from the root element
     """
     root = ET.fromstring(xml_string)
+    app_name = root.get('name', '') or root.get('label', '') or ''
+    
     lines = []
     ref_map = {}
     counter = [0]
@@ -136,4 +139,4 @@ def parse_tree(xml_string: str) -> tuple[str, dict]:
     for child in root:
         _walk(child, 0, counter, lines, ref_map)
 
-    return '\n'.join(lines), ref_map
+    return '\n'.join(lines), ref_map, app_name
