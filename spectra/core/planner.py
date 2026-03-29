@@ -99,12 +99,12 @@ _TOOL_SCHEMAS = [
     },
     {
         "name": "tap_xy",
-        "description": "Tap screen coordinates directly. Only use in screenshot fallback mode when no ref_map is available.",
+        "description": "Tap screen coordinates directly. Only use in screenshot fallback mode when no ref_map is available. Coordinates must be in the PIXEL space of the screenshot image (e.g., if the screenshot is 1206x2622, x ranges 0-1206, y ranges 0-2622). The system will automatically scale to device points.",
         "schema": {
             "type": "object",
             "properties": {
-                "x": {"type": "integer", "description": "X coordinate"},
-                "y": {"type": "integer", "description": "Y coordinate"},
+                "x": {"type": "integer", "description": "X pixel coordinate in the screenshot image"},
+                "y": {"type": "integer", "description": "Y pixel coordinate in the screenshot image"},
                 "reasoning": {"type": "string"},
             },
             "required": ["x", "y", "reasoning"],
@@ -346,6 +346,7 @@ def build_message(
     warning: str | None = None,
     memory: str | None = None,
     plan: list[str] | None = None,
+    prev_trees: list[str] | None = None,
 ) -> str:
     """Construct the per-turn user message."""
     parts = [f"TASK: {task}"]
@@ -369,12 +370,43 @@ def build_message(
         parts.append("PAGE_ARTICLES (visible headlines):\n" +
                      "\n".join(f"  {i+1}. {a}" for i, a in enumerate(metadata["page_articles"][:10])))
 
-    parts.append(f"SCREEN ({metadata.get('app_name', 'unknown')}):")
+    if metadata.get('perception_mode') == 'screenshot':
+        parts.append("⚠️ SCREENSHOT MODE: No accessibility tree available. Use tap_xy with PIXEL coordinates from the screenshot image (1206x2622 pixels). Be precise — estimate the center of the element you want to tap.")
+
+    # Previous screens for context — shows what the agent saw and did at each past step
+    if prev_trees:
+        parts.append(
+            "PAST SCREENS (read-only history — these are PREVIOUS states of the device, NOT the current screen. "
+            "All [ref] numbers from past screens are EXPIRED and must NOT be used. "
+            "Use this history to understand what information was already seen, what actions were already taken, "
+            "and how the device got to its current state):"
+        )
+        for i, entry in enumerate(prev_trees):
+            steps_ago = len(prev_trees) - i
+            if isinstance(entry, dict):
+                app = entry.get('app', '?')
+                action = entry.get('action', '')
+                result = entry.get('result', '')
+                tree_text = entry.get('tree', '')
+                condensed = tree_text[:400] if len(tree_text) > 400 else tree_text
+
+                parts.append(f"  ── {steps_ago} step(s) ago ── app: {app}")
+                if action:
+                    parts.append(f"  Action taken: {action}")
+                if result:
+                    parts.append(f"  Result: {result}")
+                parts.append(f"  What was on screen:\n{condensed}")
+            else:
+                # Legacy: plain string
+                condensed = entry[:400] if len(entry) > 400 else entry
+                parts.append(f"  ── {steps_ago} step(s) ago ──\n{condensed}")
+
+    parts.append(f"CURRENT SCREEN ({metadata.get('app_name', 'unknown')}):")
     parts.append(tree)
 
     if history:
         parts.append("RECENT ACTIONS:")
-        for h in history[-3:]:
+        for h in history[-5:]:
             parts.append(f"  {h}")
 
     if warning:
@@ -434,19 +466,30 @@ class Planner:
                 max_output_tokens=512,
             )
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=config,
-            )
-            return self._extract_action(response)
-        except Exception as e:
-            if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
-                raise RuntimeError(
-                    f'API rate limit hit — stopping agent. Details: {e}'
-                ) from e
-            raise
+        for attempt in range(3):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
+                return self._extract_action(response)
+            except RuntimeError as e:
+                if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                    raise
+                if 'no function call' in str(e).lower() and attempt < 2:
+                    print(f'  [planner] Gemini returned no action (attempt {attempt+1}/3), retrying...', flush=True)
+                    import time; time.sleep(1)
+                    continue
+                raise
+            except Exception as e:
+                if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
+                    raise RuntimeError(
+                        f'API rate limit hit — stopping agent. Details: {e}'
+                    ) from e
+                raise
+        # If all retries fail, return a wait action so the agent doesn't crash
+        return {'name': 'wait', 'input': {'seconds': 2, 'reasoning': 'Gemini did not return an action, waiting to retry'}}
 
     def next_action(
         self,
@@ -457,9 +500,10 @@ class Planner:
         warning: str | None = None,
         memory: str | None = None,
         plan: list[str] | None = None,
+        prev_trees: list[str] | None = None,
     ) -> dict:
         """Tree mode (primary). Returns {'name': str, 'input': dict}."""
-        message = build_message(task, tree, history, metadata, warning, memory, plan)
+        message = build_message(task, tree, history, metadata, warning, memory, plan, prev_trees=prev_trees)
         contents = [types.Content(role="user", parts=[types.Part(text=message)])]
         return self._generate(contents)
 
@@ -473,9 +517,10 @@ class Planner:
         warning: str | None = None,
         memory: str | None = None,
         plan: list[str] | None = None,
+        prev_trees: list[str] | None = None,
     ) -> dict:
         """Screenshot fallback mode. Sends image + sparse tree to Gemini vision."""
-        message = build_message(task, tree, history, metadata, warning, memory, plan)
+        message = build_message(task, tree, history, metadata, warning, memory, plan, prev_trees=prev_trees)
         image_part = types.Part(
             inline_data=types.Blob(
                 mime_type="image/png",
@@ -509,7 +554,8 @@ class Planner:
     def _extract_action(response) -> dict:
         """Pull the function call from the Gemini response."""
         for candidate in response.candidates:
-            for part in candidate.content.parts:
+            parts = candidate.content.parts if candidate.content and candidate.content.parts else []
+            for part in parts:
                 if part.function_call:
                     fc = part.function_call
                     return {"name": fc.name, "input": dict(fc.args)}

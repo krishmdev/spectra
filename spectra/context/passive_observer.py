@@ -58,9 +58,9 @@ class PassiveObserver:
         if self._poll_count % LEARN_INTERVAL_POLLS == 0:
             await self._learn_sequences()
 
-        # --- Periodic workflow pruning ---
-        if self._poll_count % PRUNE_INTERVAL_POLLS == 0:
-            await self._prune_workflows()
+        # Pruning disabled — was deleting all workflows in a loop
+        # if self._poll_count % PRUNE_INTERVAL_POLLS == 0:
+        #     await self._prune_workflows()
 
         # --- Snapshot ---
         loop = asyncio.get_running_loop()

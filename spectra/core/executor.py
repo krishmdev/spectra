@@ -94,8 +94,45 @@ class Executor:
         return f"JS click failed ({result}) for '{label}'"
 
     def _tap_xy(self, x: int, y: int) -> str:
-        self.client.tap(x, y)
-        return f'Tapped coordinates ({x},{y})'
+        # The LLM outputs pixel coordinates from the screenshot (e.g., 1206x2622).
+        # WDA needs point coordinates (e.g., 402x874). Scale down.
+        scale = self._get_scale_factor()
+        win_w, win_h = self._get_window_size()
+
+        # Detect if LLM already output point-space coordinates
+        # (values fit within window bounds = already in points, don't scale)
+        if x <= win_w and y <= win_h:
+            tap_x, tap_y = x, y
+            note = 'already in points'
+        else:
+            tap_x = int(x / scale)
+            tap_y = int(y / scale)
+            note = f'scaled @{scale}x'
+
+        self.client.tap(tap_x, tap_y)
+        return f'Tapped ({x},{y}) → ({tap_x},{tap_y}) [{note}]'
+
+    def _get_scale_factor(self) -> float:
+        if not hasattr(self, '_scale_factor') or self._scale_factor is None:
+            try:
+                from PIL import Image
+                import io
+                png = self.client.screenshot(format='raw')
+                img = Image.open(io.BytesIO(png))
+                size = self.client.window_size()
+                self._scale_factor = img.size[0] / size.width
+            except Exception:
+                self._scale_factor = 3.0
+        return self._scale_factor
+
+    def _get_window_size(self) -> tuple:
+        if not hasattr(self, '_window_size') or self._window_size is None:
+            try:
+                size = self.client.window_size()
+                self._window_size = (size.width, size.height)
+            except Exception:
+                self._window_size = (402, 874)
+        return self._window_size
 
     def _type(self, ref: int, text: str, ref_map: dict) -> str:
         self._tap(ref, ref_map)

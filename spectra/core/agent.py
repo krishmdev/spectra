@@ -143,6 +143,7 @@ def run_agent(
     cached_snapshot: tuple | None = None
     last_action_was_no_ui = False
     prefetch_future: concurrent.futures.Future | None = None
+    prev_screens: list[dict] = []  # rolling buffer: [{tree, app, action, step}]
 
     # Reuse a single thread pool for prefetch (avoids per-step creation overhead)
     snap_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -209,6 +210,20 @@ def run_agent(
         last_action_was_no_ui = False
         current_app = metadata.get('app_name', current_app)
 
+        if verbose:
+            mode = metadata.get('perception_mode', '?')
+            n_refs = len(ref_map)
+            tree_preview = tree[:200].replace('\n', ' | ') if tree else '(empty)'
+            print(f'  [see] app={current_app} mode={mode} refs={n_refs}', flush=True)
+            print(f'  [see] tree: {tree_preview}', flush=True)
+
+        # --- Save current screen to history (action will be added after execution) ---
+        _current_screen_entry = {
+            'tree': tree,
+            'app': current_app,
+            'step': step,
+        }
+
         # --- Check stuck ---
         warning = detector.check()
         if warning == 'HARD_STUCK':
@@ -226,6 +241,9 @@ def run_agent(
 
         # --- Think ---
         t_think = time.monotonic()
+        # Previous screens for context (last 3, current is passed separately)
+        context_trees = prev_screens[-3:] if prev_screens else []
+
         if metadata['perception_mode'] == 'screenshot':
             if metadata.get('screenshot_b64') is None:
                 action = {'name': 'stuck', 'input': {'reason': 'Lost connection to WDA on iOS Simulator (screenshot failed).'}}
@@ -239,6 +257,7 @@ def run_agent(
                     warning=warning,
                     memory=combined_memory,
                     plan=plan_steps,
+                    prev_trees=context_trees,
                 )
         else:
             action = planner.next_action(
@@ -249,6 +268,7 @@ def run_agent(
                 warning=warning,
                 memory=combined_memory,
                 plan=plan_steps,
+                prev_trees=context_trees,
             )
         think_time = time.monotonic() - t_think
 
@@ -257,8 +277,8 @@ def run_agent(
 
         if verbose:
             reasoning = action_input.get('reasoning', action_input.get('summary', action_input.get('reason', '')))
-            print(f'  Step {step}: {action_name} — {reasoning}')
-            print(f'    [timing] think={think_time:.2f}s')
+            print(f'  Step {step}: {action_name} — {reasoning}', flush=True)
+            print(f'    [think] {think_time:.2f}s | input={action_input}', flush=True)
 
         # --- Handle special actions ---
         if action_name == 'remember':
@@ -347,6 +367,14 @@ def run_agent(
         # --- Act ---
         result = executor.run(action_name, action_input, ref_map)
         history.append(f'Step {step}: {action_name} → {result}')
+
+        # Record this screen + action for context in future steps
+        reasoning = action_input.get('reasoning', action_input.get('summary', ''))
+        _current_screen_entry['action'] = f'{action_name}: {reasoning}'
+        _current_screen_entry['result'] = str(result)[:100]
+        prev_screens.append(_current_screen_entry)
+        if len(prev_screens) > 3:
+            prev_screens.pop(0)
 
         if verbose:
             print(f'    → {result}')

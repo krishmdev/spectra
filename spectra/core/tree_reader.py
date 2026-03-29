@@ -9,6 +9,55 @@ import wda
 
 from core.tree_parser import parse_tree
 
+# ---------------------------------------------------------------------------
+# Grid overlay for screenshot mode — gives the LLM numbered tap targets
+# ---------------------------------------------------------------------------
+_GRID_COLS = 3
+_GRID_ROWS = 6
+
+def _add_grid_overlay(png_bytes: bytes) -> tuple[bytes, str]:
+    """Draw a numbered grid on a screenshot. Returns (annotated_png, grid_text).
+    grid_text is a string describing each cell for the LLM prompt."""
+    from PIL import Image, ImageDraw, ImageFont
+    import io
+
+    img = Image.open(io.BytesIO(png_bytes))
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    cell_w = w // _GRID_COLS
+    cell_h = h // _GRID_ROWS
+
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
+    except Exception:
+        font = ImageFont.load_default()
+
+    lines = []
+    cell_num = 1
+    for row in range(_GRID_ROWS):
+        for col in range(_GRID_COLS):
+            x1 = col * cell_w
+            y1 = row * cell_h
+            x2 = x1 + cell_w
+            y2 = y1 + cell_h
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+
+            # Draw grid lines
+            draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
+            # Draw cell number
+            label = str(cell_num)
+            draw.text((x1 + 8, y1 + 4), label, fill='red', font=font)
+
+            lines.append(f"  [{cell_num}] center=({cx},{cy}) area=({x1},{y1})-({x2},{y2})")
+            cell_num += 1
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    grid_text = f"GRID ({_GRID_COLS}x{_GRID_ROWS}, {w}x{h} pixels):\n" + "\n".join(lines)
+    grid_text += f"\nUse tap_xy with the center coordinates of the grid cell containing your target element."
+    return buf.getvalue(), grid_text
+
 # Timeout for native apps — 20s from upstream (Safari uses JS path, not this)
 _WDA_SOURCE_TIMEOUT = 20.0
 
@@ -221,12 +270,12 @@ class TreeReader:
             }
             return tree, ref_map, metadata
 
-        # JS failed — screenshot fallback
+        # JS failed — screenshot fallback with grid overlay
         print('[TreeReader] Safari JS snapshot failed — screenshot fallback')
-        screenshot_b64 = self._try_screenshot()
+        screenshot_b64, grid_text = self._gridded_screenshot()
         url = page.get('url', '') if isinstance(page, dict) else ''
         articles = page.get('articles', []) if isinstance(page, dict) else []
-        tree_msg = '[screenshot mode — JS unavailable]'
+        tree_msg = '[screenshot mode — JS unavailable]\n' + grid_text
         if articles:
             tree_msg += '\nPAGE_ARTICLES:\n' + '\n'.join(f'  - {a}' for a in articles[:8])
         metadata = {
@@ -250,12 +299,12 @@ class TreeReader:
             raw = _source_with_timeout(self.client, timeout=_WDA_SOURCE_TIMEOUT)
         except Exception:
             print('[TreeReader] WDA source() timed out')
-            screenshot_b64 = self._try_screenshot()
+            screenshot_b64, grid_text = self._gridded_screenshot()
             metadata = {
                 'app_name': '', 'keyboard_visible': False, 'alert_present': False,
                 'perception_mode': 'screenshot', 'screenshot_b64': screenshot_b64,
             }
-            return '[screenshot mode - tree unavailable]', {}, metadata
+            return '[screenshot mode - tree unavailable]\n' + grid_text, {}, metadata
 
         keyboard_visible = 'XCUIElementTypeKeyboard' in raw
         alert_present    = 'XCUIElementTypeAlert'    in raw
@@ -265,7 +314,7 @@ class TreeReader:
         compact, ref_map, app_name = parse_tree(raw)
 
         if len(ref_map) < 3:
-            screenshot_b64 = self._try_screenshot()
+            screenshot_b64, grid_text = self._gridded_screenshot()
             metadata = {
                 'app_name': app_name, 'app_bundle_id': app_bundle_id,
                 'keyboard_visible': keyboard_visible, 'alert_present': alert_present,
@@ -273,7 +322,7 @@ class TreeReader:
                 'perception_mode': 'screenshot', 'screenshot_b64': screenshot_b64,
                 'sparse_tree': compact,
             }
-            return compact, ref_map, metadata
+            return compact + '\n' + grid_text, ref_map, metadata
 
         metadata = {
             'app_name': app_name, 'app_bundle_id': app_bundle_id,
@@ -292,6 +341,16 @@ class TreeReader:
             return root.get('bundleId', '') or ''
         except Exception:
             return ''
+
+    def _gridded_screenshot(self) -> tuple:
+        """Capture screenshot with grid overlay. Returns (b64_string, grid_text)."""
+        try:
+            png_data = self.client.screenshot(format='raw')
+            annotated_png, grid_text = _add_grid_overlay(png_data)
+            b64 = base64.b64encode(annotated_png).decode('utf-8')
+            return b64, grid_text
+        except Exception:
+            return self._try_screenshot() or '', 'GRID: unavailable'
 
     def _try_screenshot(self) -> str | None:
         try:
