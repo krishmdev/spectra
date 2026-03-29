@@ -342,16 +342,6 @@ def _run_task_in_thread(
             
             if report.failed == 0:
                 print(f"[ws] Replay successful ({report.passed} steps).")
-                # Bring app back to foreground and send done
-                time.sleep(0.5)
-                try:
-                    import subprocess
-                    subprocess.run(
-                        ['xcrun', 'simctl', 'launch', 'booted', 'com.spectra.agent'],
-                        capture_output=True, timeout=5,
-                    )
-                except Exception:
-                    pass
                 state.send({
                     'type': 'done',
                     'success': True,
@@ -490,17 +480,8 @@ def _run_task_in_thread(
         else:
             state.send({'type': 'stuck', 'reason': 'Agent could not complete the task'})
 
-        # Brief pause to let the message deliver, then bring Spectra back
-        time.sleep(0.5)
-        try:
-            import subprocess
-            subprocess.run(
-                ['xcrun', 'simctl', 'launch', 'booted', 'com.spectra.agent'],
-                capture_output=True, timeout=5,
-            )
-            print("[ws] Returned to Spectra app")
-        except Exception:
-            pass
+        # Don't bring Spectra back — let the user stay where they are.
+        # The iOS app will show a push notification that the task is done.
 
     except Exception as e:
         print(f"[ws] ERROR in task thread: {e}")
