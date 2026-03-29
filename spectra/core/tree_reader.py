@@ -34,7 +34,7 @@ _SAFARI_PAGE_JS = (
     "[role=button],[role=link],[role=menuitem],[role=tab],[role=checkbox],[role=radio]';"
     "var els=[];var n=0;"
     "document.querySelectorAll(sel).forEach(function(el){"
-    "if(n>=100)return;"
+    "if(n>=60)return;"
     "var rect=el.getBoundingClientRect();"
     "if(rect.width<5||rect.height<5)return;"
     "var s=window.getComputedStyle(el);"
@@ -325,9 +325,26 @@ def _build_tree_from_js(page: dict) -> tuple[str, dict]:
         label = text or href.split('/')[-1] or role
         label = label[:70]
 
+        y = el.get('y', 0)
+        # Show a short URL path for links so the LLM can infer content type
+        # (e.g. /article/... vs / vs /world — useful for "first article" reasoning)
+        path = ''
+        if role == 'link' and href:
+            try:
+                from urllib.parse import urlparse
+                p = urlparse(href).path
+                if p and p != '/':
+                    path = p[:40]
+            except Exception:
+                pass
+
         line = f'[{ref}] {role}'
         if label:
             line += f' "{label}"'
+        if path:
+            line += f' ({path})'
+        if y > 0:
+            line += f' @y:{y}'
         lines.append(line)
 
         ref_map[ref] = {

@@ -15,8 +15,21 @@ WEB BROWSING (Safari):
 - If a paywall or registration prompt appears AFTER opening an article, that is fine — call done() immediately. Opening the article is the completed goal.
 - If a cookie consent banner appears before you can interact with content, tap Accept/OK to dismiss it first.
 
+MAPS & LOCATION SEARCH (autocomplete fields):
+- After typing in ANY search or location field (Maps, Contacts, etc.), suggestions appear as tappable buttons. ALWAYS tap the best matching suggestion before moving on — never assume the text alone commits the location.
+- Maps has TWO distinct field types: (1) the main search bar at the top, and (2) waypoint fields (labeled "My Location", "From", "To", or "RoutePlanningWaypointCellTextField") inside the directions screen. These are different — do not type into the search bar when you mean to fill a waypoint field, and vice versa.
+- DIRECTIONS BETWEEN TWO SPECIFIC PLACES (not your current location):
+  Step 1: Tap the main search bar → type the DESTINATION → tap the matching suggestion.
+  Step 2: Tap the "Directions" button that appears on the destination card.
+  Step 3: You are now in directions mode. The "From" field shows "My Location". Tap that "From" waypoint field.
+  Step 4: Type the START location → tap the matching suggestion from the list.
+  Step 5: The route is now displayed. Call done() immediately.
+- Once both waypoint fields are filled and a route appears on the map (or the search bar summarizes "A to B"), call done(). Do NOT tap the search bar again.
+- If a waypoint field already shows the correct location, do not retype it — move on.
+
 CAPABILITIES:
 You receive the current screen as a compact accessibility tree. Each interactive element has a [ref] number. Use these refs to specify action targets. Refs change every turn — never reuse old refs.
+For web pages: links also show their URL path and y-position (e.g. [5] link "World News" (/world) @y:52 vs [12] link "Article Title" (/article/2024/...) @y:310). Use these signals to reason about what an element actually is before acting — short paths like /world are navigation; /article/ or /video/ or date-based paths suggest editorial content. Lower y = higher on page.
 
 ALREADY DONE — CHECK EVERY STEP:
 - BEFORE choosing an action, read the RECENT ACTIONS history and the current screen.
@@ -361,7 +374,7 @@ def build_message(
 
     if history:
         parts.append("RECENT ACTIONS:")
-        for h in history[-5:]:
+        for h in history[-3:]:
             parts.append(f"  {h}")
 
     if warning:
@@ -411,14 +424,14 @@ class Planner:
         if self._cache_name:
             config = types.GenerateContentConfig(
                 cached_content=self._cache_name,
-                max_output_tokens=1024,
+                max_output_tokens=512,
             )
         else:
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 tools=[types.Tool(function_declarations=TOOLS)],
                 tool_config=TOOL_CONFIG,
-                max_output_tokens=1024,
+                max_output_tokens=512,
             )
 
         try:

@@ -392,12 +392,11 @@ def run_agent(
                     
             return action_name == 'done'
 
-        # Fire off prefetch immediately — don't wait for it here.
-        # The next iteration's observe phase will wait on the future.
+        # Submit prefetch BEFORE sleep so snapshot runs in parallel with UI settle time.
         sleep_time = _ACTION_SLEEP.get(action_name, 0.3)
+        prefetch_future = snap_pool.submit(reader.snapshot)
         if sleep_time > 0:
             time.sleep(sleep_time)
-        prefetch_future = snap_pool.submit(reader.snapshot)
 
     snap_pool.shutdown(wait=False)
     elapsed = time.monotonic() - t_start

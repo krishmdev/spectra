@@ -26,6 +26,7 @@ PAGE UNDERSTANDING:
 - PAGE_ARTICLES lists article headlines visible on the page — use to identify what to tap.
 - PAGE_HEADINGS shows main headings for orientation.
 - Current URL is always shown — use it to confirm you're on the right site.
+- Each link in the tree shows its URL path (e.g. /article/2024/...) and y-position. Use these to reason about what an element actually is — a short path like / or /world is navigation; /article/ or /2024/ or /video/ suggests real content. Lower y = higher on page.
 
 ALREADY DONE:
 - Read RECENT ACTIONS before every step. If the URL shows you already navigated there, don't navigate again.
@@ -226,7 +227,7 @@ def build_web_message(
 
     if history:
         parts.append("RECENT ACTIONS:")
-        for h in history[-6:]:
+        for h in history[-3:]:
             parts.append(f"  {h}")
 
     if warning:
