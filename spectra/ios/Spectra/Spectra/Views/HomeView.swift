@@ -113,28 +113,46 @@ private struct SequenceSuggestionBanner: View {
     let onDecline: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.caption)
                     .foregroundStyle(DS.primary)
-                Text("Suggested next action")
+                Text("Recognized pattern")
                     .font(.caption2).fontWeight(.semibold)
                     .foregroundStyle(DS.primary)
                 Spacer()
-                Text("Seen \(suggestion.occurrenceCount)x")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
 
-            Text(suggestion.nextAction)
-                .font(.subheadline).fontWeight(.medium)
+            // Initial → Goal
+            HStack(alignment: .top, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NOW")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(DS.primary)
+                    Text(suggestion.initialState ?? "Current activity")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("After: \(suggestion.prefix.last ?? "")")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DS.primary.opacity(0.5))
+                    .padding(.top, 12)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NEXT")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(DS.success)
+                    Text(suggestion.goalState ?? suggestion.nextAction)
+                        .font(.caption2).fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             HStack(spacing: 12) {
                 Button(action: onDecline) {

@@ -18,7 +18,7 @@ from core.tree_reader import TreeReader
 from context.inference_engine import infer_spectra_flow
 
 # How often to re-scan the action log for new sequences
-LEARN_INTERVAL_POLLS = 15  # every ~60s at 4s polling
+LEARN_INTERVAL_POLLS = 3  # every ~30s at 10s polling
 
 
 class PassiveObserver:
@@ -35,24 +35,35 @@ class PassiveObserver:
         self.is_recording = False
         self.current_session_app = None
         self._poll_count = 0
+        print(f"[Observer] Initialized (wda_url={wda_url})")
 
     async def start(self):
-        print(f"[Observer] Passive observation started (polling WDA every 4s)")
+        print(f"[Observer] Passive observation started (polling WDA every 10s)", flush=True)
         while True:
             try:
-                await asyncio.sleep(4.0)
+                await asyncio.sleep(10.0)
                 await self._poll_once()
             except Exception as e:
-                print(f"[Observer] Exception: {e}")
+                import traceback
+                print(f"[Observer] Exception: {e}", flush=True)
+                traceback.print_exc()
 
     async def _poll_once(self):
+        self._poll_count += 1
+
+        # --- Periodic sequence learning (runs regardless of snapshot success) ---
+        if self._poll_count % LEARN_INTERVAL_POLLS == 0:
+            await self._learn_sequences()
+
+        # --- Snapshot ---
         loop = asyncio.get_running_loop()
         def _snap():
             return self.reader.snapshot()
 
         try:
             tree_text, ref_map, meta = await loop.run_in_executor(None, _snap)
-        except Exception:
+        except Exception as e:
+            print(f"[Observer] Snapshot failed: {e}", flush=True)
             return
 
         bundle_id = meta.get('app_bundle_id', '') or meta.get('app_name', 'unknown')
@@ -76,8 +87,8 @@ class PassiveObserver:
                     el.get('label', '') for el in ref_map.values()
                     if isinstance(el, dict) and el.get('label')
                 ]
-                entry = self.action_log.append(bundle_id, action_nl, labels)
-                print(f"[Observer] Action: {action_nl}")
+                self.action_log.append(bundle_id, action_nl, labels)
+                print(f"[Observer] Action: {action_nl}", flush=True)
 
                 # Check for sequence match after every new action
                 await self._check_sequence()
@@ -87,7 +98,6 @@ class PassiveObserver:
         # --- Session tracking for inference engine (existing behavior) ---
         if 'springboard' in bundle_id.lower() or bundle_id == 'unknown':
             if self.is_recording and len(self.buffer) > 1:
-                print(f"[Observer] Organic session ended. Sending {len(self.buffer)} frames to Inference Engine...")
                 self._flush_session()
             self.is_recording = False
             self.buffer.clear()
@@ -101,11 +111,6 @@ class PassiveObserver:
                 if len(self.buffer) > 10:
                     self.buffer.pop(0)
 
-        # --- Periodic sequence learning ---
-        self._poll_count += 1
-        if self._poll_count % LEARN_INTERVAL_POLLS == 0:
-            await self._learn_sequences()
-
     async def _learn_sequences(self):
         loop = asyncio.get_running_loop()
         def _learn():
@@ -113,9 +118,11 @@ class PassiveObserver:
         try:
             new_count = await loop.run_in_executor(None, _learn)
             if new_count > 0:
-                print(f"[Observer] Learned {new_count} new action sequences")
+                print(f"[Observer] Learned {new_count} new action sequences", flush=True)
         except Exception as e:
-            print(f"[Observer] Sequence learning error: {e}")
+            import traceback
+            print(f"[Observer] Sequence learning error: {e}", flush=True)
+            traceback.print_exc()
 
     async def _check_sequence(self):
         loop = asyncio.get_running_loop()
@@ -145,6 +152,8 @@ class PassiveObserver:
                 'prefix': suggestion['prefix'],
                 'full_sequence': suggestion['full_sequence'],
                 'occurrence_count': suggestion['occurrence_count'],
+                'initial_state': suggestion.get('initial_state'),
+                'goal_state': suggestion.get('goal_state'),
             }
             try:
                 self.ws_state.send(msg)
@@ -179,8 +188,8 @@ class PassiveObserver:
                     )
                     self.store.save_episode(ep)
                     print(f"[Observer] Learned new routine! '{description}' (saved to EpisodeStore)")
-            except Exception as e:
-                print(f"[Observer] Inference failed: {e}")
+            except Exception:
+                pass  # Inference engine is best-effort; new sequence detector handles learning
 
         import threading
         threading.Thread(target=_run_infer, daemon=True).start()

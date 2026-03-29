@@ -59,8 +59,20 @@ async def start_trigger_loop():
     loop = TriggerLoop(store, collector, DummyWS(), DummyIdle())
     asyncio.create_task(loop.start())
 
+    import sys
+    print("[startup] Creating PassiveObserver...", flush=True)
+    sys.stdout.flush()
     _observer = PassiveObserver()
-    asyncio.create_task(_observer.start())
+
+    async def _run_observer():
+        try:
+            await _observer.start()
+        except Exception as e:
+            import traceback
+            print(f"[Observer] FATAL: {e}")
+            traceback.print_exc()
+
+    asyncio.create_task(_run_observer())
 
 
 # ---------------------------------------------------------------------------
@@ -698,7 +710,15 @@ async def websocket_endpoint(ws: WebSocket):
                     thread.start()
 
             elif msg_type == 'sequence_suggestion_decline':
-                pass  # No-op, just acknowledged
+                seq_id = msg.get('sequence_id', '')
+                if seq_id:
+                    from context.action_log import ActionLog
+                    alog = ActionLog()
+                    seq = alog.get_sequence_by_id(seq_id)
+                    if seq:
+                        alog.record_decline(seq['actions'])
+                        alog.delete_sequence(seq_id)
+                        print(f"[ws] Sequence {seq_id} declined — deleted + backoff recorded")
 
             elif msg_type == 'stop':
                 state.stop_event.set()

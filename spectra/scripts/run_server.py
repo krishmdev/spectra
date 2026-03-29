@@ -2,6 +2,9 @@
 import os
 import sys
 
+# Ensure print() output is visible immediately (not buffered)
+os.environ['PYTHONUNBUFFERED'] = '1'
+
 # Load .env file
 env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 if os.path.exists(env_path):

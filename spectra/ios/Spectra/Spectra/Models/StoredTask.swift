@@ -30,6 +30,8 @@ struct LearnedSequence: Identifiable {
     let actions: [String]
     let occurrenceCount: Int
     let createdAt: Double
+    let initialState: String?
+    let goalState: String?
 }
 
 struct SequenceSuggestion: Identifiable {
@@ -38,4 +40,6 @@ struct SequenceSuggestion: Identifiable {
     let nextAction: String
     let prefix: [String]
     let occurrenceCount: Int
+    let initialState: String?
+    let goalState: String?
 }

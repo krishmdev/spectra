@@ -48,7 +48,18 @@ class ActionLog:
                 actions_json TEXT NOT NULL,
                 occurrence_count INT NOT NULL DEFAULT 1,
                 last_triggered_at REAL,
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                initial_state TEXT,
+                goal_state TEXT
+            )
+        ''')
+        # Tracks declined sequences with exponential backoff.
+        # signature = json.dumps(actions) so we remember even after deletion.
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS declined_sequences (
+                signature TEXT PRIMARY KEY,
+                decline_count INT NOT NULL DEFAULT 1,
+                required_occurrences INT NOT NULL DEFAULT 4
             )
         ''')
         self.conn.commit()
@@ -88,12 +99,14 @@ class ActionLog:
 
     # --- Sequence storage ---
 
-    def save_sequence(self, actions: list[str], occurrence_count: int = 1) -> str:
+    def save_sequence(self, actions: list[str], occurrence_count: int = 1,
+                      initial_state: str = None, goal_state: str = None) -> str:
         seq_id = str(uuid.uuid4())
         c = self.conn.cursor()
         c.execute(
-            'INSERT INTO action_sequences (id, actions_json, occurrence_count, created_at) VALUES (?, ?, ?, ?)',
-            (seq_id, json.dumps(actions), occurrence_count, time.time()),
+            'INSERT INTO action_sequences (id, actions_json, occurrence_count, created_at, initial_state, goal_state) VALUES (?, ?, ?, ?, ?, ?)',
+            (seq_id, json.dumps(actions), occurrence_count, time.time(),
+             initial_state, goal_state),
         )
         self.conn.commit()
         return seq_id
@@ -108,6 +121,27 @@ class ActionLog:
         c.execute('UPDATE action_sequences SET last_triggered_at = ? WHERE id = ?', (time.time(), seq_id))
         self.conn.commit()
 
+    def delete_sequence(self, seq_id: str):
+        c = self.conn.cursor()
+        c.execute('DELETE FROM action_sequences WHERE id = ?', (seq_id,))
+        self.conn.commit()
+
+    def get_sequence_by_id(self, seq_id: str):
+        c = self.conn.cursor()
+        c.execute('SELECT * FROM action_sequences WHERE id = ?', (seq_id,))
+        r = c.fetchone()
+        if not r:
+            return None
+        return {
+            'id': r['id'],
+            'actions': json.loads(r['actions_json']),
+            'occurrence_count': r['occurrence_count'],
+            'last_triggered_at': r['last_triggered_at'],
+            'created_at': r['created_at'],
+            'initial_state': r['initial_state'],
+            'goal_state': r['goal_state'],
+        }
+
     def get_all_sequences(self) -> list[dict]:
         c = self.conn.cursor()
         c.execute('SELECT * FROM action_sequences ORDER BY occurrence_count DESC')
@@ -119,8 +153,40 @@ class ActionLog:
                 'occurrence_count': r['occurrence_count'],
                 'last_triggered_at': r['last_triggered_at'],
                 'created_at': r['created_at'],
+                'initial_state': r['initial_state'],
+                'goal_state': r['goal_state'],
             })
         return results
+
+    # --- Decline tracking (exponential backoff) ---
+
+    def record_decline(self, actions: list[str]):
+        """Record that the user declined this sequence.
+        First decline sets threshold to 4. Each subsequent decline doubles it."""
+        sig = json.dumps(actions)
+        c = self.conn.cursor()
+        c.execute('SELECT decline_count, required_occurrences FROM declined_sequences WHERE signature = ?', (sig,))
+        row = c.fetchone()
+        if row:
+            new_count = row['decline_count'] + 1
+            new_required = row['required_occurrences'] * 2
+            c.execute('UPDATE declined_sequences SET decline_count = ?, required_occurrences = ? WHERE signature = ?',
+                      (new_count, new_required, sig))
+        else:
+            c.execute('INSERT INTO declined_sequences (signature, decline_count, required_occurrences) VALUES (?, 1, 4)',
+                      (sig,))
+        self.conn.commit()
+
+    def get_required_occurrences(self, actions: list[str]) -> int:
+        """Return how many times this sequence must be observed before suggesting.
+        Returns 1 (the base) if never declined — one occurrence is enough."""
+        sig = json.dumps(actions)
+        c = self.conn.cursor()
+        c.execute('SELECT required_occurrences FROM declined_sequences WHERE signature = ?', (sig,))
+        row = c.fetchone()
+        if row:
+            return row['required_occurrences']
+        return 1
 
     def _row_to_entry(self, row) -> ActionEntry:
         return ActionEntry(

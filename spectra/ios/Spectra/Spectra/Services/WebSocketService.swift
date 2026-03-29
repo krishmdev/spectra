@@ -161,7 +161,8 @@ final class WebSocketService: ObservableObject {
     }
 
     func declineSequenceSuggestion() {
-        send(["type": "sequence_suggestion_decline"])
+        let seqId = sequenceSuggestion?.sequenceId ?? ""
+        send(["type": "sequence_suggestion_decline", "sequence_id": seqId])
         DispatchQueue.main.async { self.sequenceSuggestion = nil }
     }
 
@@ -332,7 +333,9 @@ final class WebSocketService: ObservableObject {
                           let actions = d["actions"] as? [String],
                           let count = d["occurrence_count"] as? Int else { return nil }
                     return LearnedSequence(id: id, actions: actions, occurrenceCount: count,
-                                           createdAt: d["created_at"] as? Double ?? 0)
+                                           createdAt: d["created_at"] as? Double ?? 0,
+                                           initialState: d["initial_state"] as? String,
+                                           goalState: d["goal_state"] as? String)
                 }
             }
 
@@ -344,7 +347,9 @@ final class WebSocketService: ObservableObject {
                     sequenceId: seqId,
                     nextAction: nextAction,
                     prefix: prefix,
-                    occurrenceCount: json["occurrence_count"] as? Int ?? 0
+                    occurrenceCount: json["occurrence_count"] as? Int ?? 0,
+                    initialState: json["initial_state"] as? String,
+                    goalState: json["goal_state"] as? String
                 )
                 sequenceSuggestion = suggestion
                 NotificationService.shared.postSequenceSuggestion(nextAction: nextAction, prefix: prefix)

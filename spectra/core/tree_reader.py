@@ -6,7 +6,7 @@ import wda
 import threading
 from core.tree_parser import parse_tree
 
-_WDA_SOURCE_TIMEOUT = 2.5
+_WDA_SOURCE_TIMEOUT = 20.0
 
 def _source_with_timeout(client, timeout=_WDA_SOURCE_TIMEOUT):
     """Enforce a hard wall-clock timeout on WDA client.source()."""
@@ -25,7 +25,6 @@ def _source_with_timeout(client, timeout=_WDA_SOURCE_TIMEOUT):
     if exc[0]:
         raise exc[0]
     return result[0]
-
 
 class TreeReader:
     """Observe the iOS screen via WDA and return a compact tree or screenshot fallback."""
@@ -71,6 +70,7 @@ class TreeReader:
         # Extract metadata from the raw XML before parsing
         keyboard_visible = 'XCUIElementTypeKeyboard' in raw
         alert_present = 'XCUIElementTypeAlert' in raw
+        app_bundle_id = self._extract_bundle_id(raw)
 
         compact, ref_map, app_name = parse_tree(raw)
 
@@ -79,6 +79,7 @@ class TreeReader:
             screenshot_b64 = self._try_screenshot()
             metadata = {
                 'app_name': app_name,
+                'app_bundle_id': app_bundle_id,
                 'keyboard_visible': keyboard_visible,
                 'alert_present': alert_present,
                 'perception_mode': 'screenshot',
@@ -89,12 +90,23 @@ class TreeReader:
 
         metadata = {
             'app_name': app_name,
+            'app_bundle_id': app_bundle_id,
             'keyboard_visible': keyboard_visible,
             'alert_present': alert_present,
             'perception_mode': 'tree',
             'screenshot_b64': None,
         }
         return compact, ref_map, metadata
+
+    @staticmethod
+    def _extract_bundle_id(xml_string: str) -> str:
+        """Pull the bundleId from the root XCUIElementTypeApplication element."""
+        try:
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(xml_string)
+            return root.get('bundleId', '') or ''
+        except Exception:
+            return ''
 
     def _try_screenshot(self) -> str | None:
         """Capture a PNG screenshot as base64, or None if WDA is unreachable."""
