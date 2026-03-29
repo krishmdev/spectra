@@ -15,6 +15,10 @@ final class WebSocketService: ObservableObject {
     @Published var voiceTranscript: String?
     @Published var voiceError: String?
     @Published var errorMessage: String?
+    @Published var storedTasks: [StoredTask] = []
+    @Published var actionLog: [ActionLogEntry] = []
+    @Published var learnedSequences: [LearnedSequence] = []
+    @Published var sequenceSuggestion: SequenceSuggestion?
 
     private var webSocketTask: URLSessionWebSocketTask?
     private let url = URL(string: "ws://localhost:8765/ws")!
@@ -137,6 +141,28 @@ final class WebSocketService: ObservableObject {
     func sendUserAnswer(_ answer: String) {
         send(["type": "user_answer", "answer": answer])
         DispatchQueue.main.async { self.askUserRequest = nil }
+    }
+
+    func requestStoredTasks() {
+        send(["type": "stored_tasks_request"])
+    }
+
+    func requestActionLog() {
+        send(["type": "action_log_request"])
+    }
+
+    func requestSequences() {
+        send(["type": "sequences_request"])
+    }
+
+    func acceptSequenceSuggestion(_ nextAction: String) {
+        send(["type": "sequence_suggestion_accept", "next_action": nextAction])
+        DispatchQueue.main.async { self.sequenceSuggestion = nil }
+    }
+
+    func declineSequenceSuggestion() {
+        send(["type": "sequence_suggestion_decline"])
+        DispatchQueue.main.async { self.sequenceSuggestion = nil }
     }
 
     // MARK: - Internal
@@ -287,6 +313,65 @@ final class WebSocketService: ObservableObject {
 
         case "voice_cancelled":
             isVoiceListening = false
+
+        case "action_log_response":
+            if let items = json["actions"] as? [[String: Any]] {
+                actionLog = items.compactMap { d in
+                    guard let id = d["id"] as? String,
+                          let ts = d["timestamp"] as? Double,
+                          let app = d["app"] as? String,
+                          let action = d["action"] as? String else { return nil }
+                    return ActionLogEntry(id: id, timestamp: ts, app: app, action: action)
+                }
+            }
+
+        case "sequences_response":
+            if let items = json["sequences"] as? [[String: Any]] {
+                learnedSequences = items.compactMap { d in
+                    guard let id = d["id"] as? String,
+                          let actions = d["actions"] as? [String],
+                          let count = d["occurrence_count"] as? Int else { return nil }
+                    return LearnedSequence(id: id, actions: actions, occurrenceCount: count,
+                                           createdAt: d["created_at"] as? Double ?? 0)
+                }
+            }
+
+        case "sequence_suggestion":
+            if let nextAction = json["next_action"] as? String,
+               let prefix = json["prefix"] as? [String],
+               let seqId = json["sequence_id"] as? String {
+                let suggestion = SequenceSuggestion(
+                    sequenceId: seqId,
+                    nextAction: nextAction,
+                    prefix: prefix,
+                    occurrenceCount: json["occurrence_count"] as? Int ?? 0
+                )
+                sequenceSuggestion = suggestion
+                NotificationService.shared.postSequenceSuggestion(nextAction: nextAction, prefix: prefix)
+            }
+
+        case "stored_tasks_response":
+            if let tasksArray = json["tasks"] as? [[String: Any]] {
+                storedTasks = tasksArray.compactMap { dict in
+                    guard let id = dict["id"] as? String,
+                          let desc = dict["task_description"] as? String,
+                          let steps = dict["step_count"] as? Int,
+                          let occ = dict["occurrence_count"] as? Int,
+                          let created = dict["created_at"] as? Double,
+                          let hour = dict["hour_of_day"] as? Int,
+                          let dow = dict["day_of_week"] as? Int,
+                          let triggersRaw = dict["triggers"] as? [[String: Any]] else { return nil }
+                    let triggers = triggersRaw.compactMap { t -> ContextTrigger? in
+                        guard let type = t["type"] as? String,
+                              let label = t["label"] as? String,
+                              let detail = t["detail"] as? String else { return nil }
+                        return ContextTrigger(type: type, label: label, detail: detail)
+                    }
+                    return StoredTask(id: id, taskDescription: desc, stepCount: steps,
+                                      occurrenceCount: occ, createdAt: created,
+                                      hourOfDay: hour, dayOfWeek: dow, triggers: triggers)
+                }
+            }
 
         case "error":
             errorMessage = json["message"] as? String

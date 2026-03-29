@@ -23,6 +23,9 @@
 		AA00000E /* AskUserRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB00000F; };
 		AA00000F /* AskUserSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000010; };
 		AA000010 /* VoiceInputSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000011; };
+		AA000013 /* StoredTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000014; };
+		AA000014 /* StoredTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000015; };
+		AA000015 /* TransparencyPortalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB000016; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +46,9 @@
 		AB00000F /* AskUserRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserRequest.swift; sourceTree = "<group>"; };
 		AB000010 /* AskUserSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserSheet.swift; sourceTree = "<group>"; };
 		AB000011 /* VoiceInputSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputSection.swift; sourceTree = "<group>"; };
+		AB000014 /* StoredTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredTask.swift; sourceTree = "<group>"; };
+		AB000015 /* StoredTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredTasksView.swift; sourceTree = "<group>"; };
+		AB000016 /* TransparencyPortalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransparencyPortalView.swift; sourceTree = "<group>"; };
 		AC000001 /* Spectra.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spectra.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -94,6 +100,7 @@
 				AB000005 /* PlanStep.swift */,
 				AB000006 /* MemoryItem.swift */,
 				AB00000F /* AskUserRequest.swift */,
+				AB000014 /* StoredTask.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -117,6 +124,8 @@
 				AB00000C /* ConfirmationSheet.swift */,
 				AB00000D /* ResultView.swift */,
 				AB000010 /* AskUserSheet.swift */,
+				AB000015 /* StoredTasksView.swift */,
+				AB000016 /* TransparencyPortalView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -213,6 +222,9 @@
 				AA00000E /* AskUserRequest.swift in Sources */,
 				AA00000F /* AskUserSheet.swift in Sources */,
 				AA000010 /* VoiceInputSection.swift in Sources */,
+				AA000013 /* StoredTask.swift in Sources */,
+				AA000014 /* StoredTasksView.swift in Sources */,
+				AA000015 /* TransparencyPortalView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

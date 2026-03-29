@@ -1,4 +1,20 @@
-"""WebSocket server — bridges the iOS app and the Python agent backend."""
+"""WebSocket server — bridges the iOS app and the Python agent backend.
+
+WebSocket Message Contracts:
+Client -> Server:
+  - {"type": "location_response", "lat": float, "lng": float}
+  - {"type": "context_suggestion_response", "log_id": str, "accepted": bool}
+  - {"type": "episodes_request"}
+  - {"type": "stored_tasks_request"}
+  - {"type": "replay_request", "episode_id": str}
+  - {"type": "delete_episode", "episode_id": str}
+
+Server -> Client:
+  - {"type": "location_request"}
+  - {"type": "context_suggestion", "delivery": "in_app" | "notification", "episode_id": str, "suggestion": str, "log_id": str}
+  - {"type": "episodes_response", "episodes": [dict]}
+  - {"type": "stored_tasks_response", "tasks": [{id, task_description, step_count, occurrence_count, created_at, hour_of_day, day_of_week, triggers: [{type, label, detail}]}]}
+"""
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +35,32 @@ from core.router import TaskRouter
 from core.takeover import TakeoverManager
 
 app = FastAPI(title='Spectra WebSocket Server')
+
+# Global observer reference so we can wire ws_state when a client connects
+_observer = None
+
+@app.on_event("startup")
+async def start_trigger_loop():
+    global _observer
+    from context.episode_store import EpisodeStore
+    from context.context_collector import ContextCollector
+    from context.trigger_loop import TriggerLoop
+    from context.passive_observer import PassiveObserver
+
+    # Simple Mock wrappers to satisfy the TriggerLoop injection
+    class DummyWS:
+        async def request_location(self, timeout=3.0): return None
+        async def request_suggestion_response(self, req_dict, timeout=60.0): return None
+    class DummyIdle:
+        def is_active(self): return False
+
+    store = EpisodeStore()
+    collector = ContextCollector(DummyWS())
+    loop = TriggerLoop(store, collector, DummyWS(), DummyIdle())
+    asyncio.create_task(loop.start())
+
+    _observer = PassiveObserver()
+    asyncio.create_task(_observer.start())
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +206,31 @@ class ConnectionState:
         self.ask_event = threading.Event()
         self.ask_result: dict = {}
         self.stop_event = threading.Event()
+        
+        self.location_event = asyncio.Event()
+        self.location_data = None
+        self.suggestion_event = asyncio.Event()
+        self.suggestion_response = None
         self.task_running = False
         self.voice_thread: threading.Thread | None = None
+        
+    async def request_location(self, timeout=3.0):
+        self.location_event.clear()
+        self.out_queue.put_nowait({"type": "location_request"})
+        try:
+            await asyncio.wait_for(self.location_event.wait(), timeout=timeout)
+            return self.location_data
+        except asyncio.TimeoutError:
+            return None
+            
+    async def request_suggestion_response(self, req_dict, timeout=60.0):
+        self.suggestion_event.clear()
+        self.out_queue.put_nowait(req_dict)
+        try:
+            await asyncio.wait_for(self.suggestion_event.wait(), timeout=timeout)
+            return self.suggestion_response
+        except asyncio.TimeoutError:
+            return None
 
     def send(self, msg: dict) -> None:
         """Thread-safe: enqueue a message for the WebSocket sender."""
@@ -448,6 +513,11 @@ async def websocket_endpoint(ws: WebSocket):
     out_queue: asyncio.Queue = asyncio.Queue()
     state = ConnectionState(loop, out_queue)
 
+    # Wire the observer so it can send sequence suggestions to this client
+    global _observer
+    if _observer is not None:
+        _observer.ws_state = state
+
     # Sender task — drains outgoing queue and sends JSON over the socket
     async def _sender():
         try:
@@ -518,6 +588,117 @@ async def websocket_endpoint(ws: WebSocket):
             elif msg_type == 'user_answer':
                 state.ask_result['answer'] = msg.get('answer', '')
                 state.ask_event.set()
+
+            elif msg_type == 'location_response':
+                state.location_data = msg
+                state.location_event.set()
+                
+            elif msg_type == 'context_suggestion_response':
+                state.suggestion_response = msg
+                state.suggestion_event.set()
+                
+            elif msg_type == 'episodes_request':
+                from context.episode_store import EpisodeStore
+                from dataclasses import asdict
+                episodes = [asdict(e) for e in EpisodeStore().get_all_episodes()]
+                await out_queue.put({'type': 'episodes_response', 'episodes': episodes})
+
+            elif msg_type == 'stored_tasks_request':
+                from context.episode_store import EpisodeStore
+                from dataclasses import asdict
+                store = EpisodeStore()
+                episodes = store.get_all_episodes()
+                tasks = []
+                day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                for ep in episodes:
+                    triggers = []
+                    # Time trigger
+                    h = ep.hour_of_day
+                    period = 'AM' if h < 12 else 'PM'
+                    display_h = h % 12 or 12
+                    triggers.append({
+                        'type': 'time',
+                        'label': f'{display_h}:00 {period}',
+                        'detail': f'{day_names[ep.day_of_week]}s around {display_h} {period}',
+                    })
+                    # Location trigger
+                    if ep.location_lat is not None and ep.location_label:
+                        triggers.append({
+                            'type': 'location',
+                            'label': ep.location_label,
+                            'detail': f'Near {ep.location_label}',
+                        })
+                    # App trigger
+                    app_short = ep.app_bundle_id.split('.')[-1] if ep.app_bundle_id else ''
+                    if app_short:
+                        triggers.append({
+                            'type': 'app',
+                            'label': app_short,
+                            'detail': f'When using {app_short}',
+                        })
+                    tasks.append({
+                        'id': ep.id,
+                        'task_description': ep.task_description,
+                        'step_count': ep.step_count,
+                        'occurrence_count': ep.occurrence_count,
+                        'created_at': ep.created_at,
+                        'hour_of_day': ep.hour_of_day,
+                        'day_of_week': ep.day_of_week,
+                        'triggers': triggers,
+                    })
+                # Already sorted by created_at DESC from get_all_episodes
+                await out_queue.put({'type': 'stored_tasks_response', 'tasks': tasks})
+                
+            elif msg_type == 'delete_episode':
+                from context.episode_store import EpisodeStore
+                EpisodeStore().delete_episode(msg.get('episode_id', ''))
+                
+            elif msg_type == 'replay_request':
+                from context.episode_store import EpisodeStore
+                from recorder.replayer import Replayer
+                ep_id = msg.get('episode_id', '')
+                eps = [e for e in EpisodeStore().get_all_episodes() if e.id == ep_id]
+                if eps:
+                    def _do_replay():
+                        Replayer(filepath=eps[0].spectra_path).run()
+                    threading.Thread(target=_do_replay, daemon=True).start()
+
+            elif msg_type == 'action_log_request':
+                from context.action_log import ActionLog
+                alog = ActionLog()
+                actions = alog.get_all()
+                await out_queue.put({
+                    'type': 'action_log_response',
+                    'actions': [
+                        {'id': a.id, 'timestamp': a.timestamp, 'app': a.app_bundle_id, 'action': a.action_nl}
+                        for a in actions
+                    ],
+                })
+
+            elif msg_type == 'sequences_request':
+                from context.action_log import ActionLog
+                alog = ActionLog()
+                sequences = alog.get_all_sequences()
+                await out_queue.put({
+                    'type': 'sequences_response',
+                    'sequences': sequences,
+                })
+
+            elif msg_type == 'sequence_suggestion_accept':
+                # User accepted the suggestion — send the next_action as a command
+                next_action = msg.get('next_action', '')
+                if next_action and not state.task_running:
+                    state.task_running = True
+                    state.stop_event.clear()
+                    thread = threading.Thread(
+                        target=_run_task_in_thread,
+                        args=(next_action, None, state),
+                        daemon=True,
+                    )
+                    thread.start()
+
+            elif msg_type == 'sequence_suggestion_decline':
+                pass  # No-op, just acknowledged
 
             elif msg_type == 'stop':
                 state.stop_event.set()

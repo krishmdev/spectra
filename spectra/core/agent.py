@@ -14,6 +14,27 @@ from core.takeover import TakeoverManager
 from core.router import TaskRouter
 from core.plan_preview import PlanPreview
 
+import uuid
+import os
+import json
+from context.episode_store import EpisodeStore
+from context.models import Episode
+from context.context_collector import ContextSnapshot
+
+def _summarize_task(history, task, planner) -> str:
+    prompt = f"Summarize this completed task in ONE sentence (max 15 words). Task: {task}\nHistory: {'; '.join(history[-10:])}"
+    try:
+        from google.genai import types
+        config = types.GenerateContentConfig(max_output_tokens=30)
+        res = planner.client.models.generate_content(
+            model=planner.model,
+            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
+            config=config,
+        )
+        return res.text.strip().strip('"')
+    except:
+        return task[:50]
+
 # Terminal actions that end the loop
 _TERMINAL = {'done', 'stuck'}
 
@@ -124,6 +145,23 @@ def run_agent(
         print(f'  {lessons_text}')
 
     t_start = time.monotonic()
+    
+    # Capture ContextSnapshot at task start for episode logging
+    local_t = time.localtime(time.time())
+    try:
+        tmp_tree, tmp_ref_map, tmp_meta = reader.snapshot()
+        start_app_id = tmp_meta.get("app_bundle_id", "unknown")
+        start_labels = [el.get("label") for ref, el in tmp_ref_map.items() if el.get("label")]
+    except:
+        start_app_id = "unknown"
+        start_labels = []
+        
+    start_ctx = ContextSnapshot(
+        app_bundle_id=start_app_id, visible_labels=start_labels, 
+        location_lat=None, location_lng=None,
+        hour_of_day=local_t.tm_hour, day_of_week=local_t.tm_wday, 
+        captured_at=time.time()
+    )
 
     for step in range(1, max_steps + 1):
         # --- Stop check (for BackgroundRunner) ---
@@ -324,6 +362,26 @@ def run_agent(
                 print(f'  Finished in {step} steps, {elapsed:.1f}s')
             if action_name == 'stuck':
                 _reflect_and_store(planner, episodic, task, history, 'stuck', current_app, verbose)
+            elif action_name == 'done':
+                spectra_path = getattr(planner, 'current_record_path', None)
+                if not spectra_path:
+                    spectra_path = os.path.expanduser(f'~/.spectra/flows/{uuid.uuid4()}.spectra')
+                
+                desc = _summarize_task(history, task, planner)
+                ep = Episode(
+                    id=str(uuid.uuid4()), task_description=desc,
+                    spectra_path=spectra_path, step_count=step,
+                    app_bundle_id=start_ctx.app_bundle_id, visible_labels=start_ctx.visible_labels,
+                    location_lat=start_ctx.location_lat, location_lng=start_ctx.location_lng,
+                    location_label=None, hour_of_day=start_ctx.hour_of_day,
+                    day_of_week=start_ctx.day_of_week, created_at=start_ctx.captured_at,
+                    occurrence_count=1, last_suggested_at=None, last_suggestion_accepted=None
+                )
+                try:
+                    EpisodeStore().save_episode(ep)
+                except Exception as e:
+                    print(f"  [Error saving episode: {e}]")
+                    
             return action_name == 'done'
 
         # Fire off prefetch immediately — don't wait for it here.

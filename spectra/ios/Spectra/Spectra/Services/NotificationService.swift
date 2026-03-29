@@ -51,6 +51,17 @@ final class NotificationService {
         UNUserNotificationCenter.current().add(request)
     }
 
+    func postSequenceSuggestion(nextAction: String, prefix: [String]) {
+        let content = UNMutableNotificationContent()
+        content.title = "Spectra — Suggestion"
+        let context = prefix.last ?? "your recent actions"
+        content.body = "After \(context), would you like me to: \(nextAction)?"
+        content.sound = .default
+        content.categoryIdentifier = "CONFIRMATION"
+        let request = UNNotificationRequest(identifier: "spectra-sequence", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
     func postCompletion(summary: String, steps: Int, duration: Double) {
         // Clear the progress notification first
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["spectra-progress"])
