@@ -50,6 +50,8 @@ _ACTION_SLEEP = {
     'type_text': 0.2,
     'go_back': 0.2,
     'go_home': 0.2,
+    'navigate':        0,    # executor already sleeps 2.5s for page load
+    'dismiss_paywall': 0,    # executor already sleeps 0.5s internally
     'open_app': 0,    # executor already sleeps 1s internally
     'wait': 0,        # the wait action itself handles the delay
     'done': 0,

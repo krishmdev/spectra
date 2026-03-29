@@ -9,6 +9,12 @@ from google.genai import types
 
 SYSTEM_PROMPT = """You are Spectra, an iOS mobile agent. You control an iPhone by reading the accessibility tree and performing actions.
 
+WEB BROWSING (Safari):
+- When in Safari, CURRENT_URL shows the page you're on. Check it first.
+- Use `navigate(url)` to go to any website directly — ONE step, instant. Never type in the address bar.
+- If a paywall or registration prompt appears AFTER opening an article, that is fine — call done() immediately. Opening the article is the completed goal.
+- If a cookie consent banner appears before you can interact with content, tap Accept/OK to dismiss it first.
+
 CAPABILITIES:
 You receive the current screen as a compact accessibility tree. Each interactive element has a [ref] number. Use these refs to specify action targets. Refs change every turn — never reuse old refs.
 
@@ -114,6 +120,29 @@ _TOOL_SCHEMAS = [
                 "reasoning": {"type": "string"},
             },
             "required": ["direction", "reasoning"],
+        },
+    },
+    {
+        "name": "dismiss_paywall",
+        "description": "Remove paywall/subscription overlays via JavaScript injection. Use this immediately when a paywall, registration modal, or cookie banner blocks page content. More reliable than tapping a close button.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "reasoning": {"type": "string"},
+            },
+            "required": ["reasoning"],
+        },
+    },
+    {
+        "name": "navigate",
+        "description": "Navigate Safari to a URL directly. Always use this instead of typing in the address bar. Include https://.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Full URL e.g. https://www.reuters.com"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["url", "reasoning"],
         },
     },
     {
@@ -319,6 +348,13 @@ def build_message(
         parts.append("\u26a0\ufe0f ALERT is present on screen \u2014 handle it first.")
     if metadata.get("keyboard_visible"):
         parts.append("\u2328\ufe0f Keyboard is visible.")
+    if metadata.get("current_url"):
+        parts.append(f"CURRENT_URL: {metadata['current_url']}")
+    if metadata.get("paywall_detected"):
+        parts.append("ℹ️ Paywall/registration appeared — the article was opened. Call done() now.")
+    if metadata.get("page_articles"):
+        parts.append("PAGE_ARTICLES (visible headlines):\n" +
+                     "\n".join(f"  {i+1}. {a}" for i, a in enumerate(metadata["page_articles"][:10])))
 
     parts.append(f"SCREEN ({metadata.get('app_name', 'unknown')}):")
     parts.append(tree)

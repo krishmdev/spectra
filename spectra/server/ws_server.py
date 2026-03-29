@@ -239,7 +239,11 @@ class ConnectionState:
         self.ask_event = threading.Event()
         self.ask_result: dict = {}
         self.stop_event = threading.Event()
-        
+
+        # Safari agent: screen_update from Swift client
+        self.screen_update_event = threading.Event()
+        self.screen_update_data: dict = {}
+
         self.location_event = asyncio.Event()
         self.location_data = None
         self.suggestion_event = asyncio.Event()
@@ -312,6 +316,68 @@ def _voice_listen_thread(state: ConnectionState) -> None:
 # ---------------------------------------------------------------------------
 # Agent task runner (runs in a background thread)
 # ---------------------------------------------------------------------------
+
+def _run_safari_task_in_thread(
+    task: str,
+    initial_screen: dict,
+    state: ConnectionState,
+    max_steps: int = 20,
+) -> None:
+    """Run the Safari web agent in a background thread."""
+    import traceback
+    print(f"[ws/safari] Task started: {task!r}")
+    recorder = None
+    try:
+        from recorder.recorder import Recorder
+        safe_task = "".join(c if c.isalnum() else "_" for c in task)[:40]
+        filename = f"flows/{int(time.time())}_{safe_task}.spectra"
+        recorder = Recorder(filename, task=task)
+
+        t_start = time.monotonic()
+        step_counter = [0]
+
+        def step_callback(step, total, action_name, action_input, result, current_app, ref_map, tree):
+            step_counter[0] = step
+            if recorder:
+                recorder.record(step, action_name, action_input, ref_map, tree)
+            detail = action_input.get("reasoning", action_input.get("summary", ""))
+            state.send({
+                "type":   "status",
+                "step":   step,
+                "total":  total,
+                "action": action_name,
+                "detail": str(result) if not detail else detail,
+                "app":    "Safari",
+            })
+
+        from core.safari_agent import run_safari_agent
+        success = run_safari_agent(
+            task=task,
+            initial_screen=initial_screen,
+            send_fn=state.send,
+            screen_update_event=state.screen_update_event,
+            screen_update_data=state.screen_update_data,
+            stop_event=state.stop_event,
+            step_callback=step_callback,
+            max_steps=max_steps,
+            verbose=True,
+        )
+
+        elapsed = round(time.monotonic() - t_start, 1)
+        if state.stop_event.is_set():
+            state.send({"type": "done", "success": False, "summary": "Stopped by user",
+                        "steps": step_counter[0], "duration": elapsed})
+
+    except Exception as e:
+        print(f"[ws/safari] ERROR: {e}")
+        traceback.print_exc()
+        state.send({"type": "error", "message": str(e)})
+    finally:
+        if recorder:
+            recorder.close()
+        print("[ws/safari] Task thread finished")
+        state.task_running = False
+
 
 def _run_task_in_thread(
     task: str,
@@ -564,11 +630,23 @@ async def websocket_endpoint(ws: WebSocket):
                     continue
                 state.task_running = True
                 state.stop_event.clear()
-                thread = threading.Thread(
-                    target=_run_task_in_thread,
-                    args=(msg['task'], None, state),
-                    daemon=True,
-                )
+                state.screen_update_event.clear()
+
+                if msg.get('source') == 'safari_ax_agent':
+                    # Safari macOS path — uses AX tree + JS context over WebSocket
+                    initial_screen = msg.get('screen', {})
+                    thread = threading.Thread(
+                        target=_run_safari_task_in_thread,
+                        args=(msg['task'], initial_screen, state),
+                        daemon=True,
+                    )
+                else:
+                    # iOS WDA path
+                    thread = threading.Thread(
+                        target=_run_task_in_thread,
+                        args=(msg['task'], None, state),
+                        daemon=True,
+                    )
                 thread.start()
 
             elif msg_type == 'voice_start':
@@ -722,13 +800,23 @@ async def websocket_endpoint(ws: WebSocket):
                         alog.delete_sequence(seq_id)
                         print(f"[ws] Sequence {seq_id} declined — deleted + backoff recorded")
 
+            elif msg_type == 'screen_update':
+                # Safari agent: Swift client sends updated page state after each action
+                state.screen_update_data.clear()
+                state.screen_update_data.update(msg.get('screen', {}))
+                state.screen_update_event.set()
+
             elif msg_type == 'stop':
                 state.stop_event.set()
-                # Also unblock any waiting events so threads don't hang
+                # Reset task_running immediately so the user can start a new task
+                # without waiting for the blocked WDA thread to time out.
+                state.task_running = False
+                # Unblock all waiting events so threads don't hang
                 state.confirm_event.set()
                 state.plan_event.set()
                 state.takeover_event.set()
                 state.ask_event.set()
+                state.screen_update_event.set()
 
             else:
                 await ws.send_json({'type': 'error', 'message': f'Unknown message type: {msg_type}'})
