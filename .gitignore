@@ -3,6 +3,7 @@
 .env.local
 node_modules/
 venv/
+.venv/
 .pytest_cache/
 __pycache__/
 *.pyc
@@ -11,3 +12,7 @@ __pycache__/
 .idea/
 .vscode/
 .WebDriverAgent/
+
+# from former spectra/ subfolder
+data/
+config/
