@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Always-on action logger.
 
 Polls the accessibility tree via the PassiveObserver's buffer and diffs
@@ -6,6 +5,7 @@ consecutive snapshots to produce natural-language action descriptions.
 Stores every action in a SQLite table (action_log) and feeds the
 SequenceDetector for pattern matching.
 """
+from __future__ import annotations
 import sqlite3
 import json
 import os

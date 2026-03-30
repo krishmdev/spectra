@@ -60,7 +60,7 @@ class TestSnapshotLive:
         print(f'\n=== Ref Map ({len(ref_map)} entries) ===')
         for ref, info in ref_map.items():
             print(f'  [{ref}] {info["label"][:40]} @ ({info["x"]},{info["y"]} {info["width"]}x{info["height"]})')
-        print(f'\n=== Metadata ===')
+        print('\n=== Metadata ===')
         print(f'  app_name:         {metadata["app_name"]}')
         print(f'  keyboard_visible: {metadata["keyboard_visible"]}')
         print(f'  alert_present:    {metadata["alert_present"]}')

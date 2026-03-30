@@ -201,7 +201,8 @@ class TestNextActionVision:
     def test_vision_returns_action(self, planner):
         """Screenshot mode should return a valid action (likely tap_xy or plan)."""
         # Tiny 1x1 white PNG for testing — real usage sends a full screenshot
-        import struct, zlib
+        import struct
+        import zlib
         raw = b"\x00\xff\xff\xff"
         def _png():
             def chunk(ctype, data):

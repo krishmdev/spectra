@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import os
+import time
 
 from google import genai
 from google.genai import types
@@ -502,7 +503,7 @@ class Planner:
                     raise
                 if attempt < 2:
                     print(f'  [planner] Gemini error (attempt {attempt+1}/3): {str(e)[:100]}... retrying', flush=True)
-                    import time; time.sleep(1)
+                    time.sleep(1)
                     continue
                 raise
             except Exception as e:
@@ -561,9 +562,9 @@ class Planner:
             f'Task: {task}\n'
             f'Failure: {failure_type}\n'
             f'Action history:\n' + '\n'.join(history[-8:]) + '\n\n'
-            f'In ONE sentence, what specific lesson should the agent remember '
-            f'to avoid this failure next time? Name the app, screen, and what '
-            f'to do differently. Do NOT give generic advice.'
+            'In ONE sentence, what specific lesson should the agent remember '
+            'to avoid this failure next time? Name the app, screen, and what '
+            'to do differently. Do NOT give generic advice.'
         )
         config = types.GenerateContentConfig(max_output_tokens=150)
         response = self.client.models.generate_content(

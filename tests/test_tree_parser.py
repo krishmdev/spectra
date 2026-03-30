@@ -1,6 +1,5 @@
 """Tests for core.tree_parser.parse_tree()."""
 
-import pytest
 from core.tree_parser import parse_tree
 
 

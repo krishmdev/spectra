@@ -24,8 +24,8 @@ def score_episode(episode: Episode, ctx: ContextSnapshot) -> Optional[EpisodeMat
         matched_signals.append(f"using {ctx.app_bundle_id}")
 
     # Visible labels overlap (Jaccard)
-    set1 = set([l.lower() for l in episode.visible_labels if l])
-    set2 = set([l.lower() for l in ctx.visible_labels if l])
+    set1 = {label.lower() for label in episode.visible_labels if label}
+    set2 = {label.lower() for label in ctx.visible_labels if label}
     if set1 and set2:
         intersect = len(set1.intersection(set2))
         union = len(set1.union(set2))

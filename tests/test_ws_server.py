@@ -7,9 +7,8 @@ import sys
 import threading
 import time
 import types as builtin_types
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 # Stub heavy core modules so we don't need wda/genai at test time
 for mod_name in (
@@ -145,10 +144,9 @@ class TestConnectionState:
         loop = asyncio.new_event_loop()
         q = asyncio.Queue()
         state = ConnectionState(loop, q)
-
-        # send from the same thread (event loop thread) for simplicity
-        q.put_nowait({'type': 'test'})
-        assert not q.empty()
+        state.send({'type': 'test'})
+        loop.run_until_complete(asyncio.sleep(0))
+        assert q.get_nowait() == {'type': 'test'}
         loop.close()
 
 
@@ -225,7 +223,7 @@ class TestWebSocketEndpoint:
         client = TestClient(app)
         with client.websocket_connect('/ws') as ws:
             ws.send_text(json.dumps({'type': 'voice_start'}))
-            import time; time.sleep(0.2)
+            time.sleep(0.2)
             assert mock_voice.called
 
     @patch('server.ws_server._run_task_in_thread')

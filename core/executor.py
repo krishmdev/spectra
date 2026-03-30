@@ -210,7 +210,7 @@ class Executor:
                 self.client.set_context('NATIVE_APP')
                 time.sleep(0.5)
                 return f'Paywall dismissed via web ctx ({result} elements removed)'
-        except Exception as e:
+        except Exception:
             pass
 
         return 'Paywall dismiss attempted (JS execution not available in this context)'

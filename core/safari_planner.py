@@ -297,8 +297,8 @@ class SafariPlanner:
             f"You are analyzing a failed web browser agent run.\n"
             f"Task: {task}\nFailure: {failure_type}\n"
             f"Actions:\n" + "\n".join(history[-8:]) + "\n\n"
-            f"In ONE sentence, what specific lesson should be remembered to avoid this next time? "
-            f"Name the site and what to do differently."
+            "In ONE sentence, what specific lesson should be remembered to avoid this next time? "
+            "Name the site and what to do differently."
         )
         config = types.GenerateContentConfig(max_output_tokens=100)
         response = self.client.models.generate_content(

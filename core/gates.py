@@ -74,7 +74,7 @@ class ConfirmationGate:
         el = ref_map.get(ref) or ref_map.get(int(ref)) if ref is not None else None
         label = el.get('label', '') if el else ''
 
-        print(f'\n  Confirmation required:')
+        print('\n  Confirmation required:')
         print(f'   Action: {action_name}')
         if label:
             print(f'   Target: "{label}"')

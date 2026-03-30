@@ -1,0 +1,61 @@
+[project]
+name = "spectra"
+version = "0.2.0"
+description = "Accessibility-tree-first iOS agent: WebDriverAgent trees, Gemini tool calls, human-in-the-loop gates"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "facebook-wda==1.5.4",
+    "google-genai==2.25.0",
+    "fastapi==0.141.1",
+    "uvicorn==0.53.0",
+    "websockets==16.1.1",
+    "pydantic==2.13.5",
+    "rich==15.0.0",
+    "pillow==12.3.0",
+]
+
+[project.optional-dependencies]
+# Host-side voice capture. faster-whisper downloads a model on first use, so it
+# is not part of the default install or the offline demo.
+voice = [
+    "speechrecognition==3.17.0",
+    "faster-whisper==1.2.1",
+    "pyaudio==0.2.14",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-socket==0.8.1",
+    "httpx==0.28.1",
+    "ruff==0.16.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "live: needs a real simulator with WDA or a Gemini key; skipped otherwise",
+]
+filterwarnings = [
+    "ignore:\\s*on_event is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["ios", "macos"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B006", "B904"]
+ignore = ["E722", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+# both set up sys.path / module stubs before importing project code
+"scripts/run_server.py" = ["E402"]
+"tests/test_ws_server.py" = ["E402"]

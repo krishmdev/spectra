@@ -57,9 +57,7 @@ def run_safari_agent(
         if stop_event.is_set():
             break
 
-        url   = current_screen.get("url", "")
         tree  = current_screen.get("tree", "")
-        title = current_screen.get("page_title", "")
 
         # --- Stuck detection ---
         stuck_signal = detector.check()

@@ -1,6 +1,5 @@
 """Tests for episodic memory — cross-session lesson storage and retrieval."""
 
-import json
 import os
 import pytest
 from core.memory import EpisodicMemory, _extract_keywords

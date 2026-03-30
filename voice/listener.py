@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import io
 import threading
-import wave
 
 import speech_recognition as sr
 

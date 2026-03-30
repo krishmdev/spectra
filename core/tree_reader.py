@@ -55,7 +55,7 @@ def _add_grid_overlay(png_bytes: bytes) -> tuple[bytes, str]:
     buf = io.BytesIO()
     img.save(buf, format='PNG')
     grid_text = f"GRID ({_GRID_COLS}x{_GRID_ROWS}, {w}x{h} pixels):\n" + "\n".join(lines)
-    grid_text += f"\nUse tap_xy with the center coordinates of the grid cell containing your target element."
+    grid_text += "\nUse tap_xy with the center coordinates of the grid cell containing your target element."
     return buf.getvalue(), grid_text
 
 _WDA_SOURCE_TIMEOUT = 4.0  # Complex apps legitimately take 1-2s; Safari uses JS path

@@ -41,7 +41,8 @@ _scheduler = Scheduler()
 
 def _send_sim_push(title: str, body: str, bundle_id: str = 'com.spectra.agent'):
     """Send a push notification to the booted iOS simulator via xcrun simctl."""
-    import subprocess, tempfile
+    import subprocess
+    import tempfile
     payload = json.dumps({
         'aps': {
             'alert': {'title': f'Spectra — {title}', 'body': body},
@@ -357,7 +358,7 @@ def _run_safari_task_in_thread(
             })
 
         from core.safari_agent import run_safari_agent
-        success = run_safari_agent(
+        run_safari_agent(
             task=task,
             initial_screen=initial_screen,
             send_fn=state.send,
@@ -474,7 +475,7 @@ def _run_task_in_thread(
         ask_user = WSAskUser(state.send, state.ask_event, state.ask_result)
 
         # 1. Route
-        print(f"[ws] Routing task...")
+        print("[ws] Routing task...")
         route = router.route(task)
         refined = route['refined_task']
         gate.set_task(refined)

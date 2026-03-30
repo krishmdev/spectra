@@ -1,4 +1,3 @@
-from __future__ import annotations
 """Detect action patterns as [initial_state → goal_state] pairs.
 
 Workflows are derived directly from recorded actions — no LLM needed for
@@ -8,6 +7,7 @@ initial_state, the second half become the goal_state.
 When the observer detects the user doing something matching initial_state,
 it suggests performing goal_state via the agent.
 """
+from __future__ import annotations
 import json
 from context.action_log import ActionLog
 from context.action_describer import normalize_action, abstract_action

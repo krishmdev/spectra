@@ -5,17 +5,26 @@ node_modules/
 venv/
 .venv/
 .pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
+*.egg-info/
 .claude/
 .gemini/
 .idea/
 .vscode/
 .WebDriverAgent/
 
-# from former spectra/ subfolder
+# runtime state written next to the code (lessons, app registry)
 data/
 config/
+
+# recorded flows from local runs; curated examples live in examples/flows/
+flows/*.spectra
+flows/scheduled_tasks.json
+
+# scratch output from bench runs (committed results go to bench/results/)
+bench/runs/
 
 # Xcode build output / derived data
 build/

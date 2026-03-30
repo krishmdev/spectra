@@ -8,7 +8,6 @@ suggestions via the WebSocket server.
 import asyncio
 import time
 import uuid
-import os
 from context.models import Episode
 from context.episode_store import EpisodeStore
 from context.action_log import ActionLog
@@ -42,7 +41,7 @@ class PassiveObserver:
         print(f"[Observer] Initialized (wda_url={wda_url})")
 
     async def start(self):
-        print(f"[Observer] Passive observation started (polling WDA every 10s)", flush=True)
+        print("[Observer] Passive observation started (polling WDA every 10s)", flush=True)
         while True:
             try:
                 await asyncio.sleep(10.0)
