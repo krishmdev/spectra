@@ -5,7 +5,7 @@ import concurrent.futures
 import time
 
 from core.tree_reader import TreeReader
-from core.planner import Planner
+from core.planner import PlannerProtocol, make_planner
 from core.executor import Executor
 from core.stuck_detector import StuckDetector
 from core.memory import EpisodicMemory, AgentMemory
@@ -24,15 +24,8 @@ from context.context_collector import ContextSnapshot
 def _summarize_task(history, task, planner) -> str:
     prompt = f"Summarize this completed task in ONE sentence (max 15 words). Task: {task}\nHistory: {'; '.join(history[-10:])}"
     try:
-        from google.genai import types
-        config = types.GenerateContentConfig(max_output_tokens=30)
-        res = planner.client.models.generate_content(
-            model=planner.model,
-            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-            config=config,
-        )
-        return res.text.strip().strip('"')
-    except:
+        return planner.complete(prompt, max_output_tokens=30, purpose='summarize').strip().strip('"') or task[:50]
+    except Exception:
         return task[:50]
 
 # Terminal actions that end the loop
@@ -99,6 +92,7 @@ def run_agent(
     takeover: TakeoverManager | None = None,
     step_callback=None,
     ask_user_fn=None,
+    planner: PlannerProtocol | None = None,
 ) -> bool:
     """Execute a natural language task on the iOS simulator.
 
@@ -113,6 +107,7 @@ def run_agent(
         gate: ConfirmationGate instance (injectable for WebSocket server).
         takeover: TakeoverManager instance (injectable for WebSocket server).
         step_callback: Optional callable(step, max_steps, action_name, action_input, result, current_app, ref_map, tree) per step.
+        planner: Planner to use; defaults to make_planner() ($SPECTRA_PLANNER, Gemini if unset).
 
     Returns:
         True if task completed (done), False if stuck or timed out
@@ -123,7 +118,8 @@ def run_agent(
     except AttributeError:
         pass
     reader = TreeReader(wda_url, client=shared_client)
-    planner = Planner()
+    if planner is None:
+        planner = make_planner()
     executor = Executor(wda_url, client=shared_client)
     detector = StuckDetector()
     episodic = EpisodicMemory()
@@ -472,6 +468,7 @@ def run_task(
     max_steps: int = 25,
     wda_url: str = 'http://localhost:8100',
     verbose: bool = True,
+    planner: PlannerProtocol | None = None,
 ) -> bool:
     """Top-level entry point — routes task, previews plan, runs agent across app(s).
 
@@ -484,7 +481,7 @@ def run_task(
     Returns:
         True if task completed successfully.
     """
-    planner = Planner()
+    planner = planner or make_planner()
     executor = Executor(wda_url)
     router = TaskRouter(planner)
     preview = PlanPreview(planner)
@@ -513,7 +510,7 @@ def run_task(
         # No specific app — run agent directly (e.g. home screen task)
         return run_agent(
             route['refined_task'], max_steps=max_steps, wda_url=wda_url,
-            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps,
+            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps, planner=planner,
         )
 
     success = False
@@ -523,7 +520,7 @@ def run_task(
         executor.open_app(app['bundle_id'])
         success = run_agent(
             route['refined_task'], max_steps=max_steps, wda_url=wda_url,
-            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps,
+            verbose=verbose, agent_memory=agent_memory, plan_steps=plan_steps, planner=planner,
         )
 
     agent_memory.clear()

@@ -6,8 +6,6 @@ import json
 import os
 import re
 
-from google.genai import types
-
 PROMPT = """You are evaluating if a new task is EXACTLY the same as a previously completed task.
 
 New Task: "{task}"
@@ -50,7 +48,7 @@ def find_matching_workflow(task: str, planner, flows_dir: str = 'flows') -> str 
     
     Args:
         task: The user's requested task.
-        planner: An instantiated Planner object (to reuse the Gemini client).
+        planner: Any core.planner.PlannerProtocol implementation.
         flows_dir: Directory containing .spectra files.
     """
     workflows = _load_available_workflows(flows_dir)
@@ -64,13 +62,7 @@ def find_matching_workflow(task: str, planner, flows_dir: str = 'flows') -> str 
     prompt = PROMPT.format(task=task, workflows=workflows_text)
     
     try:
-        config = types.GenerateContentConfig(max_output_tokens=100)
-        response = planner.client.models.generate_content(
-            model=planner.model,
-            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-            config=config,
-        )
-        text = response.text
+        text = planner.complete(prompt, max_output_tokens=100, purpose='match_workflow')
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())

@@ -1,0 +1,20 @@
+{
+  "id": "messages_text_mom",
+  "task": "Text Mom that I'm running about 10 minutes late",
+  "aliases": ["Let Mom know I'm running about 10 minutes late"],
+  "success": {"type": "message", "contact": "Mom", "contains": "10 minutes late", "count": 1},
+  "route": {"category": "messaging", "apps": ["Messages"], "multi_app": false, "comparison": false,
+            "refined_task": "Text Mom that I'm running about 10 minutes late"},
+  "summary": "Texted Mom that you're running late",
+  "policy": [
+    {"screen": "SpringBoard/", "do": {"name": "open_app", "input": {"bundle_id": "com.apple.MobileSMS"}}},
+    {"screen": "Messages/Mom", "if_tree": "Cell \"Your iMessage, Running about 10 minutes late",
+     "do": {"name": "done", "input": {"summary": "Sent the message to Mom"}}},
+    {"screen": "Messages/Mom", "if_tree": "TextField \"Message\" → \"Running about 10 minutes late",
+     "do": {"name": "tap", "target": "Send"}},
+    {"screen": "Messages/Mom",
+     "do": {"name": "type_text", "target": "Message", "input": {"text": "Running about 10 minutes late"}}},
+    {"screen": "Messages/Messages", "do": {"name": "tap", "target_prefix": "Mom, "}},
+    {"screen": "Messages/*", "do": {"name": "go_back", "input": {}}}
+  ]
+}

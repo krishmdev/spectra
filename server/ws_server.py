@@ -30,7 +30,7 @@ from core.executor import Executor
 from core.gates import ConfirmationGate
 from core.memory import AgentMemory
 from core.plan_preview import PlanPreview
-from core.planner import Planner
+from core.planner import make_planner
 from core.router import TaskRouter
 from core.scheduler import Scheduler
 from core.takeover import TakeoverManager
@@ -406,7 +406,7 @@ def _run_task_in_thread(
         filename = f"flows/{int(time.time())}_{safe_task}.spectra"
         recorder = Recorder(filename, task=task)
 
-        planner = Planner()
+        planner = make_planner()
 
         # 0. Check for exact saved workflow to fast-forward
         from core.workflow_matcher import find_matching_workflow
@@ -545,6 +545,7 @@ def _run_task_in_thread(
                 takeover=takeover,
                 step_callback=step_callback,
                 ask_user_fn=ask_user.ask,
+                planner=planner,
             )
         else:
             for app_info in apps:
@@ -562,6 +563,7 @@ def _run_task_in_thread(
                     takeover=takeover,
                     step_callback=step_callback,
                     ask_user_fn=ask_user.ask,
+                    planner=planner,
                 )
                 if state.stop_event.is_set():
                     break

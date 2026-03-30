@@ -1,0 +1,26 @@
+{
+  "id": "stocks_to_messages",
+  "task": "Look up NVIDIA's stock price in the Stocks app and text it to Alex Chen",
+  "aliases": ["Check the NVIDIA price in Stocks and text it to Alex Chen"],
+  "success": {"type": "message", "contact": "Alex Chen", "contains_stock": "NVDA", "count": 1},
+  "route": {"category": "general", "apps": [], "multi_app": true, "comparison": false,
+            "refined_task": "Look up NVIDIA's stock price in the Stocks app and text it to Alex Chen"},
+  "plan": ["Open the Stocks app", "Read the NVDA price and remember it", "Open Messages",
+           "Open the conversation with Alex Chen", "Type the price and send it"],
+  "summary": "Texted Alex Chen the NVIDIA price",
+  "policy": [
+    {"screen": "Stocks/", "unless_memory": "nvda_price",
+     "do": {"name": "remember", "input": {"key": "nvda_price"}, "value_from": "NVDA, NVIDIA Corporation, ([0-9.]+)"}},
+    {"screen": "*", "unless_memory": "nvda_price",
+     "do": {"name": "open_app", "input": {"bundle_id": "com.apple.stocks"}}},
+    {"screen": "Messages/Alex Chen", "if_tree": "Cell \"Your iMessage, NVIDIA is at {nvda_price}",
+     "do": {"name": "done", "input": {"summary": "Sent Alex the NVIDIA price"}}},
+    {"screen": "Messages/Alex Chen", "if_tree": "TextField \"Message\" → \"NVIDIA is at {nvda_price}",
+     "do": {"name": "tap", "target": "Send"}},
+    {"screen": "Messages/Alex Chen",
+     "do": {"name": "type_text", "target": "Message", "input": {"text": "NVIDIA is at {nvda_price} right now"}}},
+    {"screen": "Messages/Messages", "do": {"name": "tap", "target_prefix": "Alex Chen, "}},
+    {"screen": "Messages/*", "do": {"name": "go_back", "input": {}}},
+    {"screen": "*", "do": {"name": "open_app", "input": {"bundle_id": "com.apple.MobileSMS"}}}
+  ]
+}

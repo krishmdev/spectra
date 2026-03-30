@@ -1,12 +1,17 @@
-"""LLM Planner — sends compact tree + task to Gemini and gets a structured action back."""
+"""LLM Planner — sends compact tree + task to Gemini and gets a structured action back.
+
+Anything that plans implements PlannerProtocol. GeminiPlanner is the real one;
+core.scripted_planner.ScriptedPlanner replays scenario fixtures so the agent
+loop can run without a key. make_planner() picks one from SPECTRA_PLANNER.
+The Gemini SDK is only imported when a GeminiPlanner is built.
+"""
 from __future__ import annotations
 
 import base64
 import os
 import time
-
-from google import genai
-from google.genai import types
+from functools import lru_cache
+from typing import Protocol
 
 SYSTEM_PROMPT = """You are Spectra, an iOS mobile agent. You control an iPhone by reading the accessibility tree and performing actions.
 
@@ -337,22 +342,34 @@ _TOOL_SCHEMAS = [
     },
 ]
 
-# Build Gemini FunctionDeclaration objects
-TOOLS = [
-    types.FunctionDeclaration(
-        name=t["name"],
-        description=t["description"],
-        parameters_json_schema=t["schema"],
+@lru_cache(maxsize=1)
+def _gemini_tools():
+    """Gemini FunctionDeclarations + a config that forces a function call."""
+    from google.genai import types
+    tools = [
+        types.FunctionDeclaration(
+            name=t["name"],
+            description=t["description"],
+            parameters_json_schema=t["schema"],
+        )
+        for t in _TOOL_SCHEMAS
+    ]
+    tool_config = types.ToolConfig(
+        function_calling_config=types.FunctionCallingConfig(
+            mode="ANY",
+        )
     )
-    for t in _TOOL_SCHEMAS
-]
+    return tools, tool_config
 
-# Force the model to always return a function call
-TOOL_CONFIG = types.ToolConfig(
-    function_calling_config=types.FunctionCallingConfig(
-        mode="ANY",
-    )
-)
+
+def __getattr__(name):
+    # TOOLS / TOOL_CONFIG used to be built at import time; keep them reachable
+    # without importing google.genai for callers that never touch Gemini.
+    if name == "TOOLS":
+        return _gemini_tools()[0]
+    if name == "TOOL_CONFIG":
+        return _gemini_tools()[1]
+    raise AttributeError(name)
 
 
 # ---------------------------------------------------------------------------
@@ -440,10 +457,31 @@ def build_message(
 # Planner
 # ---------------------------------------------------------------------------
 
-class Planner:
+class PlannerProtocol(Protocol):
+    model: str
+
+    def next_action(self, tree: str, task: str, history: list[str], metadata: dict,
+                    warning: str | None = None, memory: str | None = None,
+                    plan: list[str] | None = None, prev_trees: list | None = None) -> dict: ...
+
+    def next_action_vision(self, screenshot_b64: str, tree: str, task: str, history: list[str],
+                           metadata: dict, warning: str | None = None, memory: str | None = None,
+                           plan: list[str] | None = None, prev_trees: list | None = None) -> dict: ...
+
+    def reflect(self, task: str, history: list[str], failure_type: str) -> str: ...
+
+    def complete(self, prompt: str, max_output_tokens: int = 200, purpose: str = "") -> str:
+        """Free-text call used by the router, plan preview, workflow cache and summaries."""
+        ...
+
+
+class GeminiPlanner:
     """Send compact tree + task to Gemini and get back a structured action."""
 
     def __init__(self, model: str = "gemini-3-flash-preview"):
+        from google import genai
+        from google.genai import types
+        self._types = types
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY environment variable is not set")
@@ -459,6 +497,8 @@ class Planner:
         Uses a version hash so stale caches are never reused.
         """
         import hashlib
+        types = self._types
+        TOOLS, TOOL_CONFIG = _gemini_tools()
         tool_hash = hashlib.md5((SYSTEM_PROMPT + str(len(TOOLS))).encode()).hexdigest()[:8]
         try:
             cache = self.client.caches.create(
@@ -477,6 +517,8 @@ class Planner:
 
     def _generate(self, contents: list) -> dict:
         """Call Gemini, using content cache when available."""
+        types = self._types
+        TOOLS, TOOL_CONFIG = _gemini_tools()
         if self._cache_name:
             config = types.GenerateContentConfig(
                 cached_content=self._cache_name,
@@ -527,6 +569,7 @@ class Planner:
         prev_trees: list[str] | None = None,
     ) -> dict:
         """Tree mode (primary). Returns {'name': str, 'input': dict}."""
+        types = self._types
         message = build_message(task, tree, history, metadata, warning, memory, plan, prev_trees=prev_trees)
         contents = [types.Content(role="user", parts=[types.Part(text=message)])]
         return self._generate(contents)
@@ -544,6 +587,7 @@ class Planner:
         prev_trees: list[str] | None = None,
     ) -> dict:
         """Screenshot fallback mode. Sends image + sparse tree to Gemini vision."""
+        types = self._types
         message = build_message(task, tree, history, metadata, warning, memory, plan, prev_trees=prev_trees)
         image_part = types.Part(
             inline_data=types.Blob(
@@ -566,6 +610,7 @@ class Planner:
             'to avoid this failure next time? Name the app, screen, and what '
             'to do differently. Do NOT give generic advice.'
         )
+        types = self._types
         config = types.GenerateContentConfig(max_output_tokens=150)
         response = self.client.models.generate_content(
             model=self.model,
@@ -573,6 +618,15 @@ class Planner:
             config=config,
         )
         return response.text.strip()
+
+    def complete(self, prompt: str, max_output_tokens: int = 200, purpose: str = "") -> str:
+        types = self._types
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
+            config=types.GenerateContentConfig(max_output_tokens=max_output_tokens),
+        )
+        return response.text or ''
 
     @staticmethod
     def _extract_action(response) -> dict:
@@ -584,3 +638,18 @@ class Planner:
                     fc = part.function_call
                     return {"name": fc.name, "input": dict(fc.args)}
         raise RuntimeError(f"Gemini returned no function call: {response}")
+
+
+# Older code imports core.planner.Planner directly.
+Planner = GeminiPlanner
+
+
+def make_planner(kind: str | None = None, **kwargs) -> PlannerProtocol:
+    """Build the planner named by `kind` or $SPECTRA_PLANNER ("gemini" by default)."""
+    kind = (kind or os.environ.get("SPECTRA_PLANNER") or "gemini").lower()
+    if kind == "gemini":
+        return GeminiPlanner(**kwargs)
+    if kind == "scripted":
+        from core.scripted_planner import ScriptedPlanner
+        return ScriptedPlanner(**kwargs)
+    raise ValueError(f"unknown planner {kind!r} (expected 'gemini' or 'scripted')")

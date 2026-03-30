@@ -8,6 +8,12 @@ import uuid
 from datetime import datetime, timezone
 
 _DEFAULT_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'lessons.json')
+
+
+def default_lessons_path() -> str:
+    """data/lessons.json next to the code, or under $SPECTRA_DATA_DIR if set."""
+    data_dir = os.environ.get('SPECTRA_DATA_DIR')
+    return os.path.join(data_dir, 'lessons.json') if data_dir else _DEFAULT_PATH
 MAX_LESSONS = 50
 MAX_INJECTED = 3
 _SCORE_THRESHOLD = 2
@@ -28,8 +34,8 @@ def _extract_keywords(text: str) -> set[str]:
 class EpisodicMemory:
     """Persistent lesson store — learns from agent failures across sessions."""
 
-    def __init__(self, path: str = _DEFAULT_PATH):
-        self.path = os.path.abspath(path)
+    def __init__(self, path: str | None = None):
+        self.path = os.path.abspath(path or default_lessons_path())
         self.lessons: list[dict] = self._load()
 
     def _load(self) -> list[dict]:

@@ -6,8 +6,6 @@ import os
 import re
 import subprocess
 
-from google.genai import types
-
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'apps.json')
 
 # Default registry — only used to seed config/apps.json if it doesn't exist
@@ -77,13 +75,8 @@ class TaskRouter:
     """Classify user intent and determine which app(s) to target."""
 
     def __init__(self, planner):
-        """Initialize with a Planner instance (reuses its Gemini client).
-
-        Args:
-            planner: A core.planner.Planner instance.
-        """
-        self.client = planner.client
-        self.model = planner.model
+        """Initialize with a planner (anything implementing core.planner.PlannerProtocol)."""
+        self.planner = planner
         config = load_config()
         self.registry: dict = config.get('apps', {})
 
@@ -108,13 +101,8 @@ class TaskRouter:
             categories=categories, registry=registry_text, task=task,
         )
 
-        config = types.GenerateContentConfig(max_output_tokens=200)
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-            config=config,
-        )
-        return self._parse_route(response.text, task)
+        text = self.planner.complete(prompt, max_output_tokens=200, purpose='route')
+        return self._parse_route(text, task)
 
     def _parse_route(self, text: str, original_task: str) -> dict:
         """Parse the LLM routing response into a structured dict."""

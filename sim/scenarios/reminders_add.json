@@ -1,0 +1,21 @@
+{
+  "id": "reminders_add",
+  "task": "Add a reminder called Buy milk",
+  "aliases": ["Create a reminder that says Buy milk"],
+  "success": {"type": "reminder", "title": "Buy milk", "count": 1},
+  "route": {"category": "general", "apps": [], "multi_app": false, "comparison": false,
+            "refined_task": "Add a reminder called Buy milk"},
+  "summary": "Added Buy milk to Reminders",
+  "policy": [
+    {"screen": "alert", "do": {"name": "tap", "target": "Allow"}},
+    {"screen": "SpringBoard/", "do": {"name": "open_app", "input": {"bundle_id": "com.apple.reminders"}}},
+    {"screen": "Reminders/", "do": {"name": "tap", "target_prefix": "Reminders, "}},
+    {"screen": "Reminders/Reminders", "if_tree": "Cell \"Buy milk\"", "unless_tree": "TextField \"Title\"",
+     "do": {"name": "done", "input": {"summary": "Added Buy milk"}}},
+    {"screen": "Reminders/Reminders", "if_tree": "TextField \"Title\" → \"Buy milk\"",
+     "do": {"name": "tap", "target": "Done"}},
+    {"screen": "Reminders/Reminders", "if_tree": "TextField \"Title\"",
+     "do": {"name": "type_text", "target": "Title", "input": {"text": "Buy milk"}}},
+    {"screen": "Reminders/Reminders", "do": {"name": "tap", "target": "New Reminder"}}
+  ]
+}

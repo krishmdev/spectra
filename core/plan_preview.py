@@ -2,20 +2,13 @@
 
 import re
 
-from google.genai import types
-
 
 class PlanPreview:
     """Ask Gemini to generate a high-level plan and present it for user approval."""
 
     def __init__(self, planner):
-        """Initialize with a Planner instance (reuses its Gemini client).
-
-        Args:
-            planner: A core.planner.Planner instance.
-        """
-        self.client = planner.client
-        self.model = planner.model
+        """Initialize with a planner (anything implementing core.planner.PlannerProtocol)."""
+        self.planner = planner
 
     def generate_plan(self, task: str) -> list[str]:
         """Ask Gemini to generate a numbered step plan without executing.
@@ -34,13 +27,8 @@ class PlanPreview:
             f'Only include steps the agent can actually perform (tap, type, scroll, switch apps).\n'
             f'Do NOT include steps like "wait for user" unless sensitive input is needed.'
         )
-        config = types.GenerateContentConfig(max_output_tokens=300)
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-            config=config,
-        )
-        return self._parse_steps(response.text)
+        text = self.planner.complete(prompt, max_output_tokens=300, purpose='plan')
+        return self._parse_steps(text)
 
     def present_and_confirm(self, plan: list[str]) -> tuple[bool, list[str]]:
         """Display plan to user and wait for confirmation.

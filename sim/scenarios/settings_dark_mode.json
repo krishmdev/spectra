@@ -1,0 +1,19 @@
+{
+  "id": "settings_dark_mode",
+  "task": "Turn on Dark Mode",
+  "aliases": ["Switch the phone to dark mode", "Enable dark mode"],
+  "success": {"type": "appearance", "value": "dark"},
+  "route": {"category": "settings", "apps": ["Settings"], "multi_app": false, "comparison": false,
+            "refined_task": "Turn on Dark Mode"},
+  "summary": "Turned on Dark Mode in Settings",
+  "policy": [
+    {"screen": "SpringBoard/", "do": {"name": "open_app", "input": {"bundle_id": "com.apple.Preferences"}}},
+    {"screen": "Settings/Display & Brightness", "if_tree": "Button \"Dark\" → \"1\" \\[selected\\]",
+     "do": {"name": "done", "input": {"summary": "Dark Mode is on"}}},
+    {"screen": "Settings/Display & Brightness", "do": {"name": "tap", "target": "Dark"}},
+    {"screen": "Settings/Settings", "if_tree": "Cell \"Display & Brightness\"",
+     "do": {"name": "tap", "target": "Display & Brightness"}},
+    {"screen": "Settings/Settings", "do": {"name": "scroll", "input": {"direction": "down"}}},
+    {"screen": "Settings/*", "do": {"name": "go_back", "input": {}}}
+  ]
+}
