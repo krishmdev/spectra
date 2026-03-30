@@ -1,0 +1,5 @@
+{"type": "header", "task": "Send a good morning text to the first person in Imessage everyday at 9 am", "started_at": 1774793129.1244612, "version": 1}
+{"type": "step", "step": 1, "action": "open_app", "params": {"bundle_id": "com.apple.MobileSMS"}, "target": null, "tree_hash": "1c8b0a3c", "timestamp": 1774793137.667552}
+{"type": "step", "step": 2, "action": "schedule", "params": {"recurrence": "daily at 9am", "task": "send 'good morning' to +1 (888) 555-1212"}, "target": null, "tree_hash": "fa76b8b9", "timestamp": 1774793141.101579}
+{"type": "step", "step": 3, "action": "done", "params": {"summary": "I've scheduled a 'good morning' text to +1 (888) 555-1212, the first person in your Messages, to be sent every day at 9:00 AM."}, "target": null, "tree_hash": "fa76b8b9", "timestamp": 1774793142.895363}
+{"type": "footer", "total_steps": 3, "finished_at": 1774793143.9756842}

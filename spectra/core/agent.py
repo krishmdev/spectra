@@ -40,7 +40,7 @@ def _summarize_task(history, task, planner) -> str:
 _TERMINAL = {'done', 'stuck'}
 
 # Non-UI actions that don't change the screen — skip re-snapshot after these
-_NO_UI_ACTIONS = {'remember', 'plan', 'ask_user'}
+_NO_UI_ACTIONS = {'remember', 'plan', 'ask_user', 'schedule'}
 
 # Adaptive sleep: action → seconds to wait for UI to settle
 _ACTION_SLEEP = {
@@ -297,6 +297,33 @@ def run_agent(
             if verbose:
                 for i, s in enumerate(plan_steps, 1):
                     print(f'    {i}. {s}')
+            last_action_was_no_ui = True
+            continue
+
+        if action_name == 'schedule':
+            # Import the global scheduler from ws_server at runtime
+            sched = None
+            try:
+                from server.ws_server import _scheduler as sched
+            except Exception:
+                pass
+            if sched:
+                task_text = action_input.get('task', '')
+                recurrence = action_input.get('recurrence', '')
+                hook = sched.create(
+                    title=task_text,
+                    action_task=task_text,
+                    schedule_text=recurrence,
+                    original_prompt=task_text,
+                )
+                result_msg = f"Scheduled: '{task_text}' — {hook.get('recurrence_description', recurrence)}"
+                history.append(f'Step {step}: schedule — {result_msg}')
+                if verbose:
+                    print(f'    {result_msg}', flush=True)
+                if step_callback:
+                    step_callback(step, max_steps, 'schedule', action_input, result_msg, current_app, ref_map, tree)
+            else:
+                history.append(f'Step {step}: schedule — scheduler not available')
             last_action_was_no_ui = True
             continue
 

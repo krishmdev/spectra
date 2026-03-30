@@ -18,6 +18,7 @@ final class WebSocketService: ObservableObject {
     @Published var storedTasks: [StoredTask] = []
     @Published var actionLog: [ActionLogEntry] = []
     @Published var learnedSequences: [LearnedSequence] = []
+    @Published var scheduledHooks: [ScheduledHook] = []
     @Published var sequenceSuggestion: SequenceSuggestion?
 
     private var webSocketTask: URLSessionWebSocketTask?
@@ -155,6 +156,28 @@ final class WebSocketService: ObservableObject {
         send(["type": "sequences_request"])
     }
 
+    // MARK: - Schedule Controls
+
+    func requestSchedules() {
+        send(["type": "schedule_list"])
+    }
+
+    func pauseSchedule(_ hookId: String) {
+        send(["type": "schedule_pause", "hook_id": hookId])
+    }
+
+    func resumeSchedule(_ hookId: String) {
+        send(["type": "schedule_resume", "hook_id": hookId])
+    }
+
+    func cancelSchedule(_ hookId: String) {
+        send(["type": "schedule_cancel", "hook_id": hookId])
+    }
+
+    func runScheduleNow(_ hookId: String) {
+        send(["type": "schedule_run_now", "hook_id": hookId])
+    }
+
     func acceptSequenceSuggestion(_ nextAction: String) {
         send(["type": "sequence_suggestion_accept", "next_action": nextAction])
         DispatchQueue.main.async { self.sequenceSuggestion = nil }
@@ -207,7 +230,10 @@ final class WebSocketService: ObservableObject {
             case .success(let message):
                 // First successful receive confirms the connection is alive
                 DispatchQueue.main.async {
-                    if !self.isConnected { self.isConnected = true }
+                    if !self.isConnected {
+                        self.isConnected = true
+                        self.requestSchedules()  // Refresh from backend truth on connect
+                    }
                 }
                 switch message {
                 case .string(let text):
@@ -241,6 +267,27 @@ final class WebSocketService: ObservableObject {
         DispatchQueue.main.async { [self] in
             self.handleMessage(type: type, json: json)
         }
+    }
+
+    private static func parseHook(_ d: [String: Any]) -> ScheduledHook? {
+        guard let id = d["id"] as? String,
+              let title = d["title"] as? String,
+              let state = d["state"] as? String,
+              let scheduleType = d["schedule_type"] as? String else { return nil }
+        return ScheduledHook(
+            id: id,
+            title: title,
+            actionTask: d["action_task"] as? String ?? title,
+            state: state,
+            scheduleType: scheduleType,
+            recurrenceDescription: d["recurrence_description"] as? String ?? "",
+            nextRunAt: d["next_run_at"] as? Double,
+            lastRunAt: d["last_run_at"] as? Double,
+            lastResult: d["last_result"] as? String,
+            lastError: d["last_error"] as? String,
+            fireCount: d["fire_count"] as? Int ?? 0,
+            createdAt: d["created_at"] as? Double ?? 0
+        )
     }
 
     private func handleMessage(type: String, json: [String: Any]) {
@@ -377,6 +424,35 @@ final class WebSocketService: ObservableObject {
                                       hourOfDay: hour, dayOfWeek: dow, triggers: triggers)
                 }
             }
+
+        // --- Schedule events ---
+        case "schedule_list_result":
+            if let hooks = json["hooks"] as? [[String: Any]] {
+                scheduledHooks = hooks.compactMap { Self.parseHook($0) }
+            }
+
+        case "schedule_update":
+            if let hookDict = json["hook"] as? [String: Any],
+               let hook = Self.parseHook(hookDict) {
+                if let idx = scheduledHooks.firstIndex(where: { $0.id == hook.id }) {
+                    scheduledHooks[idx] = hook
+                } else {
+                    scheduledHooks.insert(hook, at: 0)
+                }
+            }
+
+        case "schedule_deleted":
+            if let hookId = json["hook_id"] as? String {
+                scheduledHooks.removeAll { $0.id == hookId }
+            }
+
+        case "schedule_fired":
+            // Refresh the list to get updated state
+            requestSchedules()
+
+        case "schedule_result":
+            // Refresh to get updated last_result/last_error
+            requestSchedules()
 
         case "error":
             errorMessage = json["message"] as? String

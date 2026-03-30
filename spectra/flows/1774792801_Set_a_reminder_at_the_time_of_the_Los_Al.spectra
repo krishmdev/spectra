@@ -1,0 +1,14 @@
+{"type": "header", "task": "Set a reminder at the time of the Los Altos Barber shop opening cause i need a haircut", "started_at": 1774792801.3428202, "version": 1}
+{"type": "step", "step": 1, "action": "open_app", "params": {"bundle_id": "com.apple.mobilesafari"}, "target": null, "tree_hash": "99e9cfc1", "timestamp": 1774792812.315893}
+{"type": "step", "step": 2, "action": "tap_xy", "params": {"x": 603, "y": 2403}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792817.1505668}
+{"type": "step", "step": 3, "action": "tap_xy", "params": {"x": 450, "y": 150}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792828.2960021}
+{"type": "step", "step": 4, "action": "tap_xy", "params": {"x": 603, "y": 218}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792834.680833}
+{"type": "step", "step": 5, "action": "tap_xy", "params": {"y": 2320, "x": 603}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792838.297536}
+{"type": "step", "step": 6, "action": "navigate", "params": {"url": "https://www.google.com/search?q=los+altos+barbershop+opening+hours"}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792843.3798661}
+{"type": "step", "step": 7, "action": "tap_xy", "params": {"x": 850, "y": 1600}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792848.9919128}
+{"type": "step", "step": 8, "action": "tap_xy", "params": {"x": 280, "y": 2350}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792853.9893272}
+{"type": "step", "step": 9, "action": "tap_xy", "params": {"x": 603, "y": 1966}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792858.4508538}
+{"type": "step", "step": 10, "action": "wait", "params": {"seconds": 2}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792862.861282}
+{"type": "step", "step": 11, "action": "schedule", "params": {"task": "Get a haircut at Los Altos Barber Shop", "recurrence": "Tuesday at 9am"}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792866.937508}
+{"type": "step", "step": 12, "action": "done", "params": {"summary": "I've scheduled a recurring reminder for you to get a haircut at Los Altos Barber Shop every Tuesday at 9:00 AM, which is when they open."}, "target": null, "tree_hash": "dd358609", "timestamp": 1774792870.5730162}
+{"type": "footer", "total_steps": 12, "finished_at": 1774792871.9507809}

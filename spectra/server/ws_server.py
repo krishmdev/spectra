@@ -32,9 +32,11 @@ from core.memory import AgentMemory
 from core.plan_preview import PlanPreview
 from core.planner import Planner
 from core.router import TaskRouter
+from core.scheduler import Scheduler
 from core.takeover import TakeoverManager
 
 app = FastAPI(title='Spectra WebSocket Server')
+_scheduler = Scheduler()
 
 
 def _send_sim_push(title: str, body: str, bundle_id: str = 'com.spectra.agent'):
@@ -94,6 +96,10 @@ async def start_trigger_loop():
             traceback.print_exc()
 
     asyncio.create_task(_run_observer())
+
+    # Start the scheduler polling thread
+    _scheduler._push_fn = _send_sim_push
+    _scheduler.start()
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +604,10 @@ async def websocket_endpoint(ws: WebSocket):
     if _observer is not None:
         _observer.ws_state = state
 
+    # Wire the scheduler so it can send events and execute tasks via this connection
+    _scheduler._state = state
+    _scheduler._run_agent_fn = lambda t: _run_task_in_thread(t, None, state)
+
     # Sender task — drains outgoing queue and sends JSON over the socket
     async def _sender():
         try:
@@ -805,6 +815,32 @@ async def websocket_endpoint(ws: WebSocket):
                 state.screen_update_data.clear()
                 state.screen_update_data.update(msg.get('screen', {}))
                 state.screen_update_event.set()
+
+            # --- Schedule management ---
+            elif msg_type == 'schedule_create':
+                hook = _scheduler.create(
+                    title=msg.get('title', msg.get('action_task', '')),
+                    action_task=msg.get('action_task', ''),
+                    schedule_text=msg.get('recurrence', ''),
+                    original_prompt=msg.get('original_prompt', ''),
+                )
+                await out_queue.put({'type': 'schedule_update', 'hook': hook})
+
+            elif msg_type == 'schedule_list':
+                hooks = _scheduler.list_hooks()
+                await out_queue.put({'type': 'schedule_list_result', 'hooks': hooks})
+
+            elif msg_type == 'schedule_pause':
+                _scheduler.pause(msg.get('hook_id', ''))
+
+            elif msg_type == 'schedule_resume':
+                _scheduler.resume(msg.get('hook_id', ''))
+
+            elif msg_type == 'schedule_cancel':
+                _scheduler.cancel(msg.get('hook_id', ''))
+
+            elif msg_type == 'schedule_run_now':
+                _scheduler.run_now(msg.get('hook_id', ''))
 
             elif msg_type == 'stop':
                 state.stop_event.set()

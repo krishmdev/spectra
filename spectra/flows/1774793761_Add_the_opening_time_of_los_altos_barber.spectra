@@ -1,0 +1,9 @@
+{"type": "header", "task": "Add the opening time of los altos barbershop to my reminders because i need to get a haircut", "started_at": 1774793761.280685, "version": 1}
+{"type": "step", "step": 1, "action": "navigate", "params": {"url": "https://www.google.com/search?q=los+altos+barbershop+opening+time"}, "target": null, "tree_hash": "1c8b0a3c", "timestamp": 1774793771.332522}
+{"type": "step", "step": 3, "action": "open_app", "params": {"bundle_id": "com.apple.reminders"}, "target": null, "tree_hash": "dd358609", "timestamp": 1774793778.208906}
+{"type": "step", "step": 4, "action": "tap", "params": {"ref": 15}, "target": {"label": "New Reminder", "type": "XCUIElementTypeButton", "value": "", "x": 331, "y": 803, "width": 38, "height": 38}, "tree_hash": "4d7025f1", "timestamp": 1774793782.0098171}
+{"type": "step", "step": 5, "action": "tap", "params": {"ref": 14}, "target": {"label": "Reminders, 0 reminders", "type": "XCUIElementTypeCell", "value": ", Blue", "x": 16, "y": 560, "width": 370, "height": 63}, "tree_hash": "4d7025f1", "timestamp": 1774793789.5143921}
+{"type": "step", "step": 6, "action": "batch", "params": {}, "target": null, "tree_hash": "7bef20d1", "timestamp": 1774793802.113029}
+{"type": "step", "step": 7, "action": "tap", "params": {"ref": 14}, "target": {"label": "Reminders, 1 reminder", "type": "XCUIElementTypeCell", "value": ", Blue", "x": 16, "y": 560, "width": 370, "height": 63}, "tree_hash": "3d40386a", "timestamp": 1774793806.6916962}
+{"type": "step", "step": 8, "action": "done", "params": {"summary": "I've added a reminder with the opening times for Los Altos Barber Shop (8:00 AM Tue-Fri and 9:00 AM on Sat) to your Reminders app."}, "target": null, "tree_hash": "09332356", "timestamp": 1774793808.8189282}
+{"type": "footer", "total_steps": 8, "finished_at": 1774793810.0761092}

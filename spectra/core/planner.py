@@ -314,6 +314,19 @@ _TOOL_SCHEMAS = [
             "required": ["actions", "checkpoint_reason", "reasoning"],
         },
     },
+    {
+        "name": "schedule",
+        "description": "Schedule a task to run at a specific time or recurring interval. Use this when the user asks for something to happen later, repeatedly, at a certain time, or on a schedule. NEVER open the Shortcuts app — use this tool instead.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "The ACTUAL action to perform when the schedule fires — NOT the scheduling request itself. E.g. if user says 'check CNN every morning', task is 'check CNN headlines'."},
+                "recurrence": {"type": "string", "description": "Natural language schedule: 'every 5 minutes', 'daily at 8am', 'weekdays at 9am', 'tomorrow at 3pm', 'in 10 minutes'"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["task", "recurrence", "reasoning"],
+        },
+    },
 ]
 
 # Build Gemini FunctionDeclaration objects
@@ -435,7 +448,10 @@ class Planner:
 
         Caching avoids resending the ~1400-token system prompt + tool defs
         on every call. Falls back to inline config if caching fails.
+        Uses a version hash so stale caches are never reused.
         """
+        import hashlib
+        tool_hash = hashlib.md5((SYSTEM_PROMPT + str(len(TOOLS))).encode()).hexdigest()[:8]
         try:
             cache = self.client.caches.create(
                 model=self.model,
@@ -444,7 +460,7 @@ class Planner:
                     tools=[types.Tool(function_declarations=TOOLS)],
                     tool_config=TOOL_CONFIG,
                     ttl="3600s",
-                    display_name="spectra-planner",
+                    display_name=f"spectra-planner-{tool_hash}",
                 ),
             )
             return cache.name
@@ -477,8 +493,8 @@ class Planner:
             except RuntimeError as e:
                 if '429' in str(e) or 'RESOURCE_EXHAUSTED' in str(e):
                     raise
-                if 'no function call' in str(e).lower() and attempt < 2:
-                    print(f'  [planner] Gemini returned no action (attempt {attempt+1}/3), retrying...', flush=True)
+                if attempt < 2:
+                    print(f'  [planner] Gemini error (attempt {attempt+1}/3): {str(e)[:100]}... retrying', flush=True)
                     import time; time.sleep(1)
                     continue
                 raise

@@ -9,7 +9,8 @@ struct TransparencyPortalView: View {
         VStack(spacing: 0) {
             Picker("View", selection: $selectedTab) {
                 Text("Workflows").tag(0)
-                Text("All Actions").tag(1)
+                Text("Schedules").tag(1)
+                Text("Actions").tag(2)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
@@ -17,15 +18,18 @@ struct TransparencyPortalView: View {
 
             if selectedTab == 0 {
                 workflowsTab
+            } else if selectedTab == 1 {
+                schedulesTab
             } else {
                 actionsTab
             }
         }
-        .navigationTitle("Context Triggers")
+        .navigationTitle("Automation")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             ws.requestSequences()
             ws.requestActionLog()
+            ws.requestSchedules()
         }
         .sheet(item: $selectedWorkflow) { workflow in
             WorkflowDetailSheet(sequence: workflow)
@@ -47,6 +51,28 @@ struct TransparencyPortalView: View {
                     ForEach(ws.learnedSequences) { seq in
                         WorkflowCard(sequence: seq)
                             .onTapGesture { selectedWorkflow = seq }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+        }
+    }
+
+    // MARK: - Schedules Tab
+
+    private var schedulesTab: some View {
+        ScrollView {
+            if ws.scheduledHooks.isEmpty {
+                emptyState(
+                    icon: "clock.badge.checkmark",
+                    title: "No scheduled tasks",
+                    subtitle: "Ask Spectra to do something on a schedule and it will appear here."
+                )
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(ws.scheduledHooks) { hook in
+                        ScheduleCard(hook: hook, ws: ws)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -282,6 +308,173 @@ private struct WorkflowDetailSheet: View {
         fmt.dateStyle = .medium
         fmt.timeStyle = .short
         return fmt.string(from: date)
+    }
+}
+
+// MARK: - Schedule Card
+
+private struct ScheduleCard: View {
+    let hook: ScheduledHook
+    let ws: WebSocketService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Header: title + state badge
+            HStack {
+                Text(hook.title)
+                    .font(.subheadline).fontWeight(.medium)
+                    .lineLimit(2)
+                Spacer()
+                StateBadge(state: hook.state)
+            }
+
+            // Recurrence
+            if !hook.recurrenceDescription.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: hook.isRecurring ? "repeat" : "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(hook.recurrenceDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // Live countdown to next run
+            if let nextRun = hook.nextRunAt, hook.isActive || hook.isRunning {
+                TimelineView(.periodic(from: Date(), by: 1)) { context in
+                    let remaining = nextRun - context.date.timeIntervalSince1970
+                    if remaining > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "timer")
+                                .font(.caption2)
+                                .foregroundStyle(DS.primary)
+                            Text("Next run in \(formatCountdown(remaining))")
+                                .font(.caption2).fontWeight(.medium)
+                                .foregroundStyle(DS.primary)
+                        }
+                    } else if hook.isRunning {
+                        HStack(spacing: 4) {
+                            ProgressView().controlSize(.mini)
+                            Text("Running now...")
+                                .font(.caption2).fontWeight(.medium)
+                                .foregroundStyle(DS.warning)
+                        }
+                    }
+                }
+            }
+
+            // Last run info
+            if let lastRun = hook.lastRunAt {
+                HStack(spacing: 4) {
+                    if let result = hook.lastResult {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption2).foregroundStyle(DS.success)
+                        Text(result).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    } else if let error = hook.lastError {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption2).foregroundStyle(DS.danger)
+                        Text(error).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Text(formatRelative(lastRun))
+                        .font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
+            }
+
+            // Controls
+            HStack(spacing: 8) {
+                if hook.isActive || hook.isFailed {
+                    Button("Pause") { ws.pauseSchedule(hook.id) }
+                        .buttonStyle(ScheduleButtonStyle(color: DS.warning))
+                }
+                if hook.isPaused {
+                    Button("Resume") { ws.resumeSchedule(hook.id) }
+                        .buttonStyle(ScheduleButtonStyle(color: DS.success))
+                }
+                if !hook.isCompleted {
+                    Button("Cancel") { ws.cancelSchedule(hook.id) }
+                        .buttonStyle(ScheduleButtonStyle(color: DS.danger))
+                }
+                if hook.isActive || hook.isPaused {
+                    Button("Run Now") { ws.runScheduleNow(hook.id) }
+                        .buttonStyle(ScheduleButtonStyle(color: DS.primary))
+                }
+                Spacer()
+                if hook.fireCount > 0 {
+                    Text("Ran \(hook.fireCount)x")
+                        .font(.system(size: 9)).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func formatCountdown(_ seconds: Double) -> String {
+        let s = Int(seconds)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m \(s % 60)s" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
+    }
+
+    private func formatRelative(_ ts: Double) -> String {
+        let date = Date(timeIntervalSince1970: ts)
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .abbreviated
+        return fmt.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct StateBadge: View {
+    let state: String
+    var body: some View {
+        Text(state.capitalized)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(badgeColor)
+            .clipShape(Capsule())
+    }
+    private var badgeColor: Color {
+        switch state {
+        case "active": return DS.success
+        case "running": return DS.primary
+        case "paused": return DS.warning
+        case "completed": return .gray
+        case "failed": return DS.danger
+        default: return .gray
+        }
+    }
+}
+
+private struct ScheduleButtonStyle: ButtonStyle {
+    let color: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption2).fontWeight(.medium)
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+private struct ScheduleSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption).fontWeight(.bold)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+            content()
+        }
     }
 }
 

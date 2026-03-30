@@ -1,0 +1,9 @@
+{"type": "header", "task": "Send the stock price of NVIDIA to the first person in iMessage", "started_at": 1774794824.682726, "version": 1}
+{"type": "step", "step": 1, "action": "open_app", "params": {"bundle_id": "com.apple.stocks"}, "target": null, "tree_hash": "1c8b0a3c", "timestamp": 1774794831.5386398}
+{"type": "step", "step": 2, "action": "navigate", "params": {"url": "https://www.google.com/search?q=NVIDIA+stock+price"}, "target": null, "tree_hash": "1c8b0a3c", "timestamp": 1774794837.0449789}
+{"type": "step", "step": 3, "action": "open_app", "params": {"bundle_id": "com.apple.MobileSMS"}, "target": null, "tree_hash": "dd358609", "timestamp": 1774794841.2636642}
+{"type": "step", "step": 4, "action": "tap", "params": {"ref": 2}, "target": {"label": "+1 (888) 555-1212, 248.80 USD, 10:31 AM", "type": "XCUIElementTypeCell", "value": "", "x": 0, "y": 116, "width": 402, "height": 87}, "tree_hash": "bee85c3f", "timestamp": 1774794844.458729}
+{"type": "step", "step": 5, "action": "type_text", "params": {"text": "NVIDIA stock price is 167.52 USD", "ref": 6}, "target": {"label": "Message", "type": "XCUIElementTypeTextField", "value": "iMessage", "x": 90, "y": 805, "width": 240, "height": 41}, "tree_hash": "1597af00", "timestamp": 1774794850.850063}
+{"type": "step", "step": 6, "action": "tap", "params": {"ref": 7}, "target": {"label": "Send", "type": "XCUIElementTypeButton", "value": "", "x": 341, "y": 516, "width": 39, "height": 28}, "tree_hash": "f506e6ad", "timestamp": 1774794854.766834}
+{"type": "step", "step": 7, "action": "done", "params": {"summary": "I have successfully sent the NVIDIA stock price (167.52 USD) to the first contact in Messages."}, "target": null, "tree_hash": "ba2ab302", "timestamp": 1774794857.870901}
+{"type": "footer", "total_steps": 7, "finished_at": 1774794859.068168}

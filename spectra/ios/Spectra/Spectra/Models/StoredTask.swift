@@ -43,3 +43,27 @@ struct SequenceSuggestion: Identifiable {
     let initialState: String?
     let goalState: String?
 }
+
+// MARK: - Scheduled Tasks (Time Hooks)
+
+struct ScheduledHook: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let actionTask: String
+    let state: String          // active, running, paused, completed, failed
+    let scheduleType: String   // one_time, interval, calendar
+    let recurrenceDescription: String
+    let nextRunAt: Double?
+    let lastRunAt: Double?
+    let lastResult: String?
+    let lastError: String?
+    let fireCount: Int
+    let createdAt: Double
+
+    var isRecurring: Bool { scheduleType != "one_time" }
+    var isActive: Bool { state == "active" }
+    var isRunning: Bool { state == "running" }
+    var isPaused: Bool { state == "paused" }
+    var isCompleted: Bool { state == "completed" }
+    var isFailed: Bool { state == "failed" }
+}
