@@ -334,7 +334,7 @@ def run_agent(
             takeover.wait_for_resume()
             # Invalidate snapshots — user has been interacting with device
             cached_snapshot = None
-            prefetched_snapshot = None
+            prefetch_future = None
             continue
 
         if action_name == 'ask_user':
