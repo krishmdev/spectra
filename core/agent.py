@@ -186,7 +186,7 @@ def run_agent(
         elif prefetch_future is not None:
             # Wait for the in-flight prefetch (started at end of previous step)
             try:
-                tree, ref_map, metadata = prefetch_future.result(timeout=4.0)
+                tree, ref_map, metadata = prefetch_future.result(timeout=6.0)
                 cached_snapshot = (tree, ref_map, metadata)
             except Exception:
                 if cached_snapshot is not None:
@@ -198,7 +198,7 @@ def run_agent(
         else:
             _snap_future = snap_pool.submit(reader.snapshot)
             try:
-                tree, ref_map, metadata = _snap_future.result(timeout=4.0)
+                tree, ref_map, metadata = _snap_future.result(timeout=6.0)
             except Exception:
                 if cached_snapshot is not None:
                     tree, ref_map, metadata = cached_snapshot

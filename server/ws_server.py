@@ -395,6 +395,9 @@ def _run_task_in_thread(
     """Execute the full route → plan → agent flow in a thread."""
     import traceback
     print(f"[ws] Task thread started: {task!r}")
+    # Pause observer during task to avoid doubling WDA source() calls
+    if _observer is not None:
+        _observer.paused = True
     recorder = None
     try:
         from recorder.recorder import Recorder
@@ -583,8 +586,70 @@ def _run_task_in_thread(
     finally:
         if recorder:
             recorder.close()
+        # Check WDA health after task — restart if degraded
+        try:
+            _check_and_restart_wda(wda_url)
+        except Exception as e:
+            print(f'[WDA] Health check error: {e}')
+        # Resume observer after task
+        if _observer is not None:
+            _observer.paused = False
         print("[ws] Task thread finished")
         state.task_running = False
+
+
+def _wda_destination() -> str:
+    udid = os.environ.get('SIM_UDID')
+    if udid:
+        return f'id={udid}'
+    return f"platform=iOS Simulator,name={os.environ.get('SIM_DEVICE', 'iPhone 17 Pro')}"
+
+
+def _check_and_restart_wda(wda_url='http://localhost:8100', slow_after=0.8):
+    """Restart WDA if a source() round trip takes longer than `slow_after` seconds.
+
+    WDA gets slower the longer a session runs (see the iOS 18 notes in the PRD).
+    WDA_PROJ points at the WebDriverAgent checkout, same as scripts/restart_all.sh.
+    """
+    import subprocess as _sp
+    import urllib.request
+    try:
+        t0 = time.monotonic()
+        urllib.request.urlopen(f'{wda_url}/source', timeout=3).read()
+        elapsed = time.monotonic() - t0
+    except Exception:
+        elapsed = 3.0
+
+    if elapsed <= slow_after:
+        print(f'[WDA] Healthy ({elapsed:.2f}s)')
+        return False
+
+    project = os.path.expanduser(
+        os.environ.get('WDA_PROJ', '~/WebDriverAgent/WebDriverAgent.xcodeproj'))
+    if not os.path.exists(project):
+        print(f'[WDA] Degraded ({elapsed:.1f}s) but WDA_PROJ={project} does not exist; not restarting')
+        return False
+
+    print(f'[WDA] Degraded ({elapsed:.1f}s) — restarting...')
+    _sp.run(['pkill', '-f', 'xcodebuild.*WebDriverAgentRunner'], capture_output=True)
+    time.sleep(2)
+    _sp.Popen(
+        ['xcodebuild', 'test',
+         '-project', project,
+         '-scheme', 'WebDriverAgentRunner',
+         '-destination', _wda_destination()],
+        stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+    )
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            urllib.request.urlopen(f'{wda_url}/status', timeout=2)
+            print('[WDA] Restarted successfully')
+            return True
+        except Exception:
+            pass
+    print('[WDA] Restart timed out')
+    return True
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,7 @@ class PassiveObserver:
         self.is_recording = False
         self.current_session_app = None
         self._poll_count = 0
+        self.paused = False  # pause during active task to avoid doubling source() calls
         print(f"[Observer] Initialized (wda_url={wda_url})")
 
     async def start(self):
@@ -52,6 +53,9 @@ class PassiveObserver:
                 traceback.print_exc()
 
     async def _poll_once(self):
+        if self.paused:
+            return
+
         self._poll_count += 1
 
         # --- Periodic sequence learning (runs regardless of snapshot success) ---
@@ -64,6 +68,30 @@ class PassiveObserver:
 
         # --- Snapshot ---
         loop = asyncio.get_running_loop()
+
+        # Use lightweight screenshot hash for change detection (avoids WDA source() degradation)
+        def _screenshot_hash():
+            try:
+                png = self.reader.client.screenshot(format='raw')
+                return hash(png)
+            except Exception:
+                return None
+
+        try:
+            screen_hash = await loop.run_in_executor(None, _screenshot_hash)
+        except Exception:
+            return
+
+        if screen_hash is None:
+            return
+
+        now = time.time()
+
+        # Only call source() when the screen actually changed — keeps WDA healthy
+        if self.prev_frame and self.prev_frame['hash'] == screen_hash:
+            return  # no change, skip
+
+        # Screen changed — now get the full tree for rich action description
         def _snap():
             return self.reader.snapshot()
 
@@ -74,8 +102,7 @@ class PassiveObserver:
             return
 
         bundle_id = meta.get('app_bundle_id', '') or meta.get('app_name', 'unknown')
-        now = time.time()
-        tree_hash = meta.get('tree_hash', str(hash(tree_text)))
+        tree_hash = screen_hash  # use screenshot hash for diffing
 
         curr_frame = {
             'time': now,

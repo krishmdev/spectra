@@ -58,8 +58,7 @@ def _add_grid_overlay(png_bytes: bytes) -> tuple[bytes, str]:
     grid_text += f"\nUse tap_xy with the center coordinates of the grid cell containing your target element."
     return buf.getvalue(), grid_text
 
-# Timeout for native apps — 20s from upstream (Safari uses JS path, not this)
-_WDA_SOURCE_TIMEOUT = 20.0
+_WDA_SOURCE_TIMEOUT = 4.0  # Complex apps legitimately take 1-2s; Safari uses JS path
 
 # ---------------------------------------------------------------------------
 # JS executed inside the Safari web view — returns visible interactive
