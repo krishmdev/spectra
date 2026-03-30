@@ -10,12 +10,15 @@ class StuckDetector:
     def __init__(self):
         self.tree_hashes: list[str] = []
         self.action_history: list[tuple[str, int | None]] = []
+        self.label_history: list[tuple[str, str]] = []  # (action, label)
 
-    def record(self, tree_text: str, action: str, ref: int | None = None):
+    def record(self, tree_text: str, action: str, ref: int | None = None, label: str | None = None):
         """Record a step for analysis."""
         h = hashlib.md5(tree_text.encode()).hexdigest()[:8]
         self.tree_hashes.append(h)
         self.action_history.append((action, ref))
+        if label:
+            self.label_history.append((action, label.lower()))
 
     def check(self) -> str | None:
         """Return a warning string if stuck, None otherwise."""
@@ -28,6 +31,17 @@ class StuckDetector:
         if len(self.action_history) >= 3:
             if len(set(self.action_history[-3:])) == 1:
                 return 'Same action repeated 3 times. Try a completely different approach.'
+
+        # Same action+LABEL 3x (catches tapping same element with different refs)
+        if len(self.label_history) >= 3:
+            if len(set(self.label_history[-3:])) == 1:
+                label = self.label_history[-1][1]
+                return (
+                    f'You tapped "{label}" 3 times with no effect. '
+                    f'This element requires a DIFFERENT interaction — '
+                    f'try scrolling, swiping, or using a different control. '
+                    f'Do NOT tap it again.'
+                )
 
         # Alternating 2-action loop (A→B→A→B = 4 actions)
         if len(self.action_history) >= 4:
@@ -69,3 +83,4 @@ class StuckDetector:
         """Clear all recorded history."""
         self.tree_hashes.clear()
         self.action_history.clear()
+        self.label_history.clear()

@@ -414,8 +414,14 @@ def run_agent(
             cached_snapshot = None
             prefetch_future = None
 
-        # Record for stuck detection
-        detector.record(tree, action_name, action_input.get('ref'))
+        # Record for stuck detection (include label for same-element detection)
+        ref = action_input.get('ref')
+        label = None
+        if ref is not None:
+            el = ref_map.get(ref) or ref_map.get(int(ref))
+            if el:
+                label = el.get('label', '')
+        detector.record(tree, action_name, ref, label=label)
 
         # --- Check terminal ---
         if action_name in _TERMINAL:

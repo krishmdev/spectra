@@ -59,6 +59,13 @@ iOS NAVIGATION:
 - When a text field is focused, the keyboard appears
 - Containers may have content below the fold — scroll to find more
 
+iOS CONTROLS — HOW TO INTERACT:
+- Date/time pickers: These are scroll wheels, NOT buttons. Tapping the time label toggles the picker open/closed. To change the value, scroll within the picker region or look for increment/decrement controls.
+- Switches/toggles: Tap to flip between on/off states.
+- Segmented controls: Tap the segment you want directly.
+- If tapping an element doesn't change its value, it's a picker or special control — try a DIFFERENT interaction (scroll, swipe, or look for nearby controls).
+- If you've tapped the same element twice with no change, do NOT tap it again. It requires a different interaction method.
+
 MEMORY:
 - Use `remember` to store values for cross-app comparison
 - PAST LESSONS from previous runs may appear — follow them
