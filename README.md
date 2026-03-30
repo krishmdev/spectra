@@ -451,8 +451,7 @@ Current environment variables used directly by the code:
 - The iOS client currently uses server-side voice capture from the Mac microphone in its primary home-screen flow, even though an on-device `SpeechService` also exists in the app.
 - The lightweight `scripts/start_server.sh` entrypoint does not load `.env` or alter WebSocket ping settings; for the current simulator app flow, `python scripts/run_server.py` is the more complete launcher.
 
-## Demo
-https://www.loom.com/share/8702524fdef44b14936edce3c784a8de
+## [Demo](https://www.youtube.com/watch?v=_koDR96GIto)
 
 ## Additional Documentation
 
