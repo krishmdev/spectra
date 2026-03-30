@@ -2,11 +2,15 @@
 # restart_all.sh — Full restart: simulator boot → WDA → Spectra app build → backend server
 set -e
 
-SIM_UDID="92AE937B-E99E-4B16-BC42-0200DB1C3FDB"
-SPECTRA_PROJ="/Users/vsangireddy/spectra/spectra/ios/Spectra/Spectra.xcodeproj"
-WDA_PROJ="/Users/vsangireddy/yhack/WebDriverAgent/WebDriverAgent.xcodeproj"
-SPECTRA_ROOT="/Users/vsangireddy/spectra/spectra"
-BUNDLE_ID="com.spectra.agent"
+# Repo root is derived from this script's location, so the script works from any clone.
+SPECTRA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SPECTRA_PROJ="$SPECTRA_ROOT/ios/Spectra/Spectra.xcodeproj"
+
+# Machine-specific values — override via env, e.g. `SIM_UDID=... WDA_PROJ=... ./scripts/restart_all.sh`.
+# WebDriverAgent lives outside this repo; point WDA_PROJ at your local checkout.
+SIM_UDID="${SIM_UDID:-92AE937B-E99E-4B16-BC42-0200DB1C3FDB}"
+WDA_PROJ="${WDA_PROJ:-$HOME/WebDriverAgent/WebDriverAgent.xcodeproj}"
+BUNDLE_ID="${BUNDLE_ID:-com.spectra.agent}"
 
 echo "==> [1/5] Killing existing server and WDA processes..."
 lsof -ti:8765 | xargs kill -9 2>/dev/null || true

@@ -16,3 +16,10 @@ __pycache__/
 # from former spectra/ subfolder
 data/
 config/
+
+# Xcode build output / derived data
+build/
+DerivedData/
+*.xcbuilddata/
+*.xcuserstate
+xcuserdata/
