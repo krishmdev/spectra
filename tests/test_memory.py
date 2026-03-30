@@ -79,14 +79,21 @@ class TestPersistence:
         mem1.add_lesson(
             task='Test task',
             app='TestApp',
-            lesson='A persistent lesson.',
+            lesson='In Settings, open Display & Brightness before looking for Dark.',
             failure_type='stuck',
             history_summary='test',
         )
         # New instance, same path
         mem2 = EpisodicMemory(path)
         assert len(mem2.lessons) == 1
-        assert mem2.lessons[0]['lesson'] == 'A persistent lesson.'
+        assert mem2.lessons[0]['lesson'].startswith('In Settings')
+
+    def test_short_lessons_are_rejected(self, tmp_path):
+        # add_lesson drops vague or truncated reflections on purpose
+        mem = EpisodicMemory(str(tmp_path / 'lessons.json'))
+        mem.add_lesson(task='t', app='a', lesson='Too short.', failure_type='stuck',
+                       history_summary='')
+        assert mem.lessons == []
 
     def test_corrupted_file_loads_empty(self, tmp_path):
         path = str(tmp_path / 'lessons.json')

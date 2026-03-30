@@ -43,7 +43,7 @@ class TestGateCheck:
         gate = ConfirmationGate()
         ref_map = {1: {'type': 'XCUIElementTypeSecureTextField', 'label': 'Password',
                         'value': '', 'x': 0, 'y': 0, 'width': 300, 'height': 44}}
-        action = {'name': 'scroll', 'input': {'direction': 'down'}}
+        action = {'name': 'tap', 'input': {'ref': 1}}
         assert gate.check(action, ref_map) is True
 
     def test_non_tap_skips_label_check(self):

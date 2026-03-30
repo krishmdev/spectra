@@ -95,8 +95,13 @@ class TestBuildMessage:
 
 class TestToolDefinitions:
 
-    def test_twelve_tools(self):
-        assert len(TOOLS) == 12
+    def test_tool_surface(self):
+        # The PRD listed 12 tools; the hackathon build grew to 18.
+        assert {t.name for t in TOOLS} == {
+            'tap', 'tap_xy', 'type_text', 'scroll', 'dismiss_paywall', 'navigate',
+            'go_back', 'go_home', 'open_app', 'wait', 'remember', 'handoff',
+            'plan', 'done', 'stuck', 'ask_user', 'batch', 'schedule',
+        }
 
     def test_all_have_names(self):
         for tool in TOOLS:
