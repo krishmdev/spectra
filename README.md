@@ -21,6 +21,7 @@ Unlike screenshot-only computer-use systems, Spectra uses the accessibility tree
 7. [Testing](#testing)
 8. [Configuration](#configuration)
 9. [Known Constraints](#known-constraints)
+10. [Demo](#demo)
 
 ## What It Does
 
@@ -449,6 +450,9 @@ Current environment variables used directly by the code:
 - The planner is Gemini-based in the current codebase; some older docs still reference Claude and are no longer authoritative.
 - The iOS client currently uses server-side voice capture from the Mac microphone in its primary home-screen flow, even though an on-device `SpeechService` also exists in the app.
 - The lightweight `scripts/start_server.sh` entrypoint does not load `.env` or alter WebSocket ping settings; for the current simulator app flow, `python scripts/run_server.py` is the more complete launcher.
+
+## Demo
+https://www.loom.com/share/8702524fdef44b14936edce3c784a8de
 
 ## Additional Documentation
 
