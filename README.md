@@ -10,6 +10,10 @@ The current codebase is split across:
 
 Unlike screenshot-only computer-use systems, Spectra uses the accessibility tree as its primary perception layer. That gives the model semantic UI elements like `Cell "Wi-Fi"` or `Button "Send"` instead of forcing it to infer everything from pixels.
 
+## 🎥 Demo
+
+Watch a walkthrough of Spectra: **[Demo »](https://www.youtube.com/watch?v=_koDR96GIto)**
+
 ## Table of Contents
 
 1. [What It Does](#what-it-does)
@@ -21,7 +25,6 @@ Unlike screenshot-only computer-use systems, Spectra uses the accessibility tree
 7. [Testing](#testing)
 8. [Configuration](#configuration)
 9. [Known Constraints](#known-constraints)
-10. [Demo](#demo)
 
 ## What It Does
 
@@ -450,8 +453,6 @@ Current environment variables used directly by the code:
 - The planner is Gemini-based in the current codebase; some older docs still reference Claude and are no longer authoritative.
 - The iOS client currently uses server-side voice capture from the Mac microphone in its primary home-screen flow, even though an on-device `SpeechService` also exists in the app.
 - The lightweight `scripts/start_server.sh` entrypoint does not load `.env` or alter WebSocket ping settings; for the current simulator app flow, `python scripts/run_server.py` is the more complete launcher.
-
-## [Demo](https://www.youtube.com/watch?v=_koDR96GIto)
 
 ## Additional Documentation
 
