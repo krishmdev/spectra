@@ -1,16 +1,26 @@
-"""Live integration tests for core.tree_reader.TreeReader.
+"""Integration tests for core.tree_reader.TreeReader.
 
-Requires a booted iOS simulator with WDA running on localhost:8100.
-Run:  python -m pytest tests/test_tree_reader.py -v -s
+These used to need a booted simulator with WDA on :8100; they now run against
+the mock device in sim/. Set SPECTRA_WDA_URL to point them at a real WDA.
 """
+import os
 
 import pytest
+
 from core.tree_reader import TreeReader
 
 
 @pytest.fixture(scope='module')
 def reader():
-    return TreeReader('http://localhost:8100')
+    url = os.environ.get('SPECTRA_WDA_URL')
+    if url:
+        yield TreeReader(url)
+        return
+    from sim.server import serve_in_thread
+    server, url = serve_in_thread(0, seed=0)
+    server.device.launch('com.apple.Preferences')
+    yield TreeReader(url)
+    server.shutdown()
 
 
 class TestSnapshotLive:
