@@ -407,6 +407,7 @@ def _run_task_in_thread(
         recorder = Recorder(filename, task=task)
 
         planner = make_planner()
+        gate = WSConfirmationGate(state.send, state.confirm_event, state.confirm_result)
 
         # 0. Check for exact saved workflow to fast-forward
         from core.workflow_matcher import find_matching_workflow
@@ -434,7 +435,10 @@ def _run_task_in_thread(
                 })
                 
             from recorder.replayer import Replayer
-            replayer = Replayer(match_id, wda_url=wda_url, step_delay=0.4)
+            # Replays go through the same confirmation gate as live runs, and a step
+            # whose element can't be found confidently is handed to the planner.
+            gate.set_task(task)
+            replayer = Replayer(match_id, wda_url=wda_url, step_delay=0.4, gate=gate, planner=planner)
             report = replayer.run(step_callback=replay_callback)
             
             if report.failed == 0:
@@ -469,7 +473,6 @@ def _run_task_in_thread(
         router = TaskRouter(planner)
         executor = Executor(wda_url)
 
-        gate = WSConfirmationGate(state.send, state.confirm_event, state.confirm_result)
         takeover = WSTakeoverManager(state.send, state.takeover_event)
         memory = WSAgentMemory(state.send)
         ask_user = WSAskUser(state.send, state.ask_event, state.ask_result)
@@ -551,6 +554,10 @@ def _run_task_in_thread(
             for app_info in apps:
                 gate.current_app_bundle = app_info['bundle_id']
                 executor.open_app(app_info['bundle_id'])
+                if recorder:
+                    # The router's launch is part of the flow; without it a replay starts on
+                    # whatever screen happens to be up.
+                    recorder.record(0, 'open_app', {'bundle_id': app_info['bundle_id']}, {}, '')
                 success = run_agent(
                     refined,
                     max_steps=max_steps,

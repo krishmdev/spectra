@@ -281,6 +281,9 @@ def run_agent(
             value = action_input['value']
             agent_memory.store(key, value)
             history.append(f'Step {step}: remember {key}={value}')
+            if step_callback:
+                # Recorded so a saved flow knows it depends on values read at run time.
+                step_callback(step, max_steps, 'remember', action_input, f'Stored {key}', current_app, ref_map, tree)
             if verbose:
                 print(f'    Stored: {key} = {value}')
             last_action_was_no_ui = True

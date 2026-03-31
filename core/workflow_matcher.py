@@ -48,6 +48,8 @@ def _load_available_workflows(flows_dir: str, exclude: str | None = None) -> dic
             continue
         steps = [e for e in entries if e.get('type') == 'step']
         finished = any(e.get('type') == 'footer' for e in entries)
+        if any(e.get('action') == 'remember' for e in steps):
+            continue  # typed values read at run time; a replay would reuse stale ones
         if steps and finished and steps[-1].get('action') == 'done':
             workflows[path] = entries[0]['task']
     return workflows
