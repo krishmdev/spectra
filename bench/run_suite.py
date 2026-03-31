@@ -168,7 +168,7 @@ def run_trial(arm, scenario, seed, paths, env, sim_url, timeout, out_dir, tag) -
     row.update({k: res.get(k) for k in (
         'agent_done', 'agent_stuck', 'error', 'steps', 'confirmations', 'plan_previews', 'replayed',
         'llm_calls', 'llm_errors', 'llm_error_samples', 'prompt_tokens', 'cached_tokens', 'output_tokens',
-        'thought_tokens', 'cache_creates', 'stuck_warnings', 'hard_stuck', 'wall_seconds')})
+        'thought_tokens', 'cache_creates', 'stuck_warnings', 'hard_stuck', 'wall_seconds', 'egress_canary')})
     row['after'] = state_hashes(paths)
     row['lessons_after'] = len(json.load(open(os.path.join(paths['code'], 'data', 'lessons.json'))))
     row['flows_after'] = len([f for f in os.listdir(os.path.join(paths['code'], 'flows')) if f.endswith('.spectra')])
@@ -284,12 +284,15 @@ def main(argv=None) -> int:
     sim = subprocess.Popen([sys.executable, '-m', 'sim.server', '--port', str(port)], cwd=REPO,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env['SPECTRA_SIM_URL'] = sim_url
-    for _ in range(50):
+    for _ in range(100):
+        if sim.poll() is not None:
+            raise SystemExit(f'mock device exited with code {sim.returncode} (egress canary failed?)')
         try:
             http_json(f'{sim_url}/status')
             break
         except OSError:
             time.sleep(0.1)
+    device_canary = http_json(f'{sim_url}/_sim/canary')
 
     rows: list[dict] = []
     started = time.strftime('%Y-%m-%dT%H:%M:%S%z')
@@ -341,6 +344,7 @@ def main(argv=None) -> int:
         'scenario_sha256': {sid: sha256_file(os.path.join(REPO, 'sim', 'scenarios', f'{sid}.json')) for sid in ids},
         'initial_state': {'lessons_sha256': sha256_file(os.path.join(INITIAL_STATE, 'lessons.json')),
                           'flows_sha256': sha256_dir(os.path.join(INITIAL_STATE, 'flows'))},
+        'egress_canary_device': device_canary,
         'state_contract': 'fresh code copy + seeded data/ and flows/ + fresh HOME per trial; '
                           'POST /_sim/reset {seed} before each trial' if args.experiment == 'paired' else
                           'one persistent trial dir per arm across the sequence; device reset before each task',

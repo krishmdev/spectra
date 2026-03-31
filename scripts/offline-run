@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run a command and all of its children with outbound network denied except
+# localhost and unix sockets (macOS sandbox-exec), with provider keys unset.
+# On Linux use a `docker run --network none` container instead (see CI).
+#   scripts/offline-run make demo
+here="$(cd "$(dirname "$0")" && pwd)"
+if ! command -v sandbox-exec >/dev/null 2>&1; then
+  echo "offline-run: sandbox-exec not found (macOS only); use a --network none container" >&2
+  exit 2
+fi
+exec env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY -u ANTHROPIC_API_KEY \
+  SPECTRA_OFFLINE=1 SPECTRA_EGRESS_CANARY=1 \
+  sandbox-exec -f "$here/offline.sb" "$@"

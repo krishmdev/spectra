@@ -130,6 +130,19 @@ def _instrument(stats: dict) -> None:
     StuckDetector.check = check
 
 
+def _egress_canary() -> dict:
+    # Same check as sim/egress.py, inlined because this file runs inside old trees too.
+    import socket
+    opened = []
+    for host, port in [('1.1.1.1', 443), ('generativelanguage.googleapis.com', 443), ('huggingface.co', 443)]:
+        try:
+            socket.create_connection((host, port), timeout=3).close()
+            opened.append(f'{host}:{port}')
+        except OSError:
+            pass
+    return {'ran': True, 'pid': os.getpid(), 'blocked': not opened, 'open': opened}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--task', required=True)
@@ -142,6 +155,13 @@ def main(argv=None) -> int:
              'prompt_tokens': 0, 'cached_tokens': 0, 'output_tokens': 0, 'thought_tokens': 0,
              'cache_creates': 0, 'stuck_warnings': 0, 'hard_stuck': 0}
     result: dict = {'task': args.task}
+    if os.environ.get('SPECTRA_EGRESS_CANARY') == '1':
+        result['egress_canary'] = _egress_canary()
+        if not result['egress_canary']['blocked']:
+            result['error'] = 'egress canary: external connect succeeded inside the agent process'
+            with open(args.out, 'w') as f:
+                json.dump(result, f, indent=2)
+            return 3
     t0 = time.monotonic()
     try:
         _instrument(stats)
