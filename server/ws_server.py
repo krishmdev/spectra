@@ -411,7 +411,7 @@ def _run_task_in_thread(
         # 0. Check for exact saved workflow to fast-forward
         from core.workflow_matcher import find_matching_workflow
         print("[ws] Checking for matching workflow...")
-        match_id = find_matching_workflow(task, planner)
+        match_id = find_matching_workflow(task, planner, exclude=filename)
         if match_id:
             print(f"[ws] Found exact match: {match_id}. Fast-forwarding.")
             state.send({

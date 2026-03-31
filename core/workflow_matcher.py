@@ -24,26 +24,35 @@ If there is an exact match, output its ID: {{"match": "id_string"}}
 Respond with ONLY valid JSON.
 """
 
-def _load_available_workflows(flows_dir: str) -> dict[str, str]:
-    """Return dict of {filepath: task_string}."""
+def _load_available_workflows(flows_dir: str, exclude: str | None = None) -> dict[str, str]:
+    """Return {filepath: task} for recordings that finished with at least one step.
+
+    `exclude` is the recording the server just opened for the current task. Its
+    header is already on disk, so without this every task matched itself and
+    "replayed" zero steps.
+    """
     workflows = {}
     if not os.path.isdir(flows_dir):
         return workflows
-        
+    skip = os.path.abspath(exclude) if exclude else None
+
     for path in glob.glob(os.path.join(flows_dir, '*.spectra')):
+        if skip and os.path.abspath(path) == skip:
+            continue
         try:
             with open(path) as f:
-                first_line = f.readline().strip()
-                if not first_line:
-                    continue
-                data = json.loads(first_line)
-                if data.get('type') == 'header' and data.get('task'):
-                    workflows[path] = data['task']
+                entries = [json.loads(line) for line in f if line.strip()]
         except Exception:
-            pass
+            continue
+        if not entries or entries[0].get('type') != 'header' or not entries[0].get('task'):
+            continue
+        steps = [e for e in entries if e.get('type') == 'step']
+        finished = any(e.get('type') == 'footer' for e in entries)
+        if steps and finished and steps[-1].get('action') == 'done':
+            workflows[path] = entries[0]['task']
     return workflows
 
-def find_matching_workflow(task: str, planner, flows_dir: str = 'flows') -> str | None:
+def find_matching_workflow(task: str, planner, flows_dir: str = 'flows', exclude: str | None = None) -> str | None:
     """Returns the filepath of an exact matching workflow, or None.
     
     Args:
@@ -51,7 +60,7 @@ def find_matching_workflow(task: str, planner, flows_dir: str = 'flows') -> str 
         planner: Any core.planner.PlannerProtocol implementation.
         flows_dir: Directory containing .spectra files.
     """
-    workflows = _load_available_workflows(flows_dir)
+    workflows = _load_available_workflows(flows_dir, exclude=exclude)
     if not workflows:
         return None
         
