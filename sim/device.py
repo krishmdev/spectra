@@ -176,8 +176,10 @@ class Device:
         with self.lock:
             if bundle_id not in INSTALLED:
                 return False
+            if bundle_id != self.foreground:
+                # Activating the app that is already in front keeps its keyboard focus.
+                self.focus = None
             self.foreground = bundle_id
-            self.focus = None
             if bundle_id in self.pending_alerts:
                 self.alert = self.pending_alerts.pop(bundle_id)
             self._log('launch', bundle_id=bundle_id)
