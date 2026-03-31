@@ -4,7 +4,7 @@ that facebook-wda (and therefore Spectra's reader/executor) uses.
     python -m sim.server --port 8100 --seed 0
 
 Extra endpoints under /_sim/ are for tests and the eval harness:
-    POST /_sim/reset   {"seed": int}      -> fresh device state
+    POST /_sim/reset   {"seed": int, "variant": ""|"relabel"} -> fresh device state
     GET  /_sim/state                      -> ground truth (appearance, reminders, messages, ...)
     GET  /_sim/events                     -> every tap/keys/launch the device received
     POST /_sim/launch  {"bundle_id": str} -> what `xcrun simctl launch` does (see sim/bin/xcrun)
@@ -137,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send([{'bundleId': b, 'name': n} for b, n in APP_NAMES.items()])
 
         if path == '/_sim/reset' and method == 'POST':
-            d.reset(int(body.get('seed', 0)))
+            d.reset(int(body.get('seed', 0)), str(body.get('variant', '')))
             return self._send(raw=d.state())
         if path == '/_sim/state':
             return self._send(raw=d.state())

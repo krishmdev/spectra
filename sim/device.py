@@ -58,6 +58,15 @@ PREVIEWS = {
 STOCKS_BASE = [('AAPL', 'Apple Inc.', 229.87), ('NVDA', 'NVIDIA Corporation', 167.52),
                ('MSFT', 'Microsoft Corporation', 505.12), ('GOOGL', 'Alphabet Inc.', 201.33),
                ('TSLA', 'Tesla, Inc.', 331.05)]
+# variant='relabel' simulates an OS update that renames a few things.
+RELABEL = {
+    'Display & Brightness': 'Display and Brightness',
+    'Send': 'Send Message',
+    'Message': 'iMessage',
+    'Yesterday': 'Tuesday',
+    'Call me when you land': 'Did you land yet?',
+    'Are we still on for Friday?': 'Friday still good?',
+}
 REMINDER_POOL = ['Call the dentist', 'Pay rent', 'Return library books', 'Pick up dry cleaning',
                  'Renew passport', 'Water the plants']
 
@@ -87,16 +96,18 @@ class Device:
     pending_alerts: dict[str, dict] = field(default_factory=dict)
     alert: dict | None = None
     events: list[dict] = field(default_factory=list)
+    variant: str = ''
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # reset / ground truth
     # ------------------------------------------------------------------
 
-    def reset(self, seed: int = 0) -> None:
+    def reset(self, seed: int = 0, variant: str = '') -> None:
         with self.lock:
             rng = random.Random(seed)
             self.seed = seed
+            self.variant = variant
             self.foreground = SPRINGBOARD
             self.appearance = 'light'
             self.auto_appearance = False
@@ -132,6 +143,7 @@ class Device:
         with self.lock:
             data = {
                 'seed': self.seed,
+                'variant': self.variant,
                 'foreground': self.foreground,
                 'screen': self.screen_id(),
                 'appearance': self.appearance,
@@ -151,6 +163,9 @@ class Device:
             if s['symbol'] == symbol:
                 return s['price']
         return None
+
+    def t(self, label: str) -> str:
+        return RELABEL.get(label, label) if self.variant == 'relabel' else label
 
     def screen_id(self) -> str:
         if self.foreground == SPRINGBOARD:
@@ -368,7 +383,7 @@ class Device:
                     cell.add(El('Switch', label='Airplane Mode', value='0', frame=(320, y + 10, 51, 31),
                                 on_tap=lambda: None))
                 else:
-                    cell = _cell(label, SETTINGS_VALUES.get(label), y, lambda s=label: self._push(s))
+                    cell = _cell(self.t(label), SETTINGS_VALUES.get(label), y, lambda s=label: self._push(s))
                 rows.append((y, cell))
                 y += ROW_H
             y += SECTION_GAP
@@ -382,7 +397,7 @@ class Device:
     def _display(self) -> list[El]:
         dark = self.appearance == 'dark'
         els = [
-            self._nav_bar('Display & Brightness', back='Settings'),
+            self._nav_bar(self.t('Display & Brightness'), back='Settings'),
             El('StaticText', label='APPEARANCE', value='APPEARANCE', frame=(32, 166, 200, 18)),
             El('Button', label='Light', frame=(60, 196, 100, 170), selected=not dark,
                value='1' if not dark else '0', on_tap=lambda: self._set_appearance('light')),
@@ -447,9 +462,9 @@ class Device:
             rows = []
             for i, contact in enumerate(self.thread_order):
                 last = self.threads[contact][-1]
-                preview = last['text'] if last['from'] == 'them' else f'You: {last["text"]}'
+                preview = self.t(last['text']) if last['from'] == 'them' else f'You: {last["text"]}'
                 y = CONTENT_TOP + i * 76
-                rows.append(El('Cell', label=f'{contact}, {preview}, Yesterday', frame=(0, y, SCREEN_W, 76),
+                rows.append(El('Cell', label=f'{contact}, {preview}, {self.t("Yesterday")}', frame=(0, y, SCREEN_W, 76),
                                on_tap=lambda c=contact: self._push(c)).add(
                     El('Image', label=contact, frame=(16, y + 14, 48, 48)),
                     El('StaticText', label=contact, value=contact, frame=(76, y + 12, 220, 22)),
@@ -478,9 +493,9 @@ class Device:
         bar_y = 480 if self.focus == field_id else 790
         compose = El('Other', frame=(0, bar_y, SCREEN_W, 50)).add(
             El('Button', label='Apps', frame=(12, bar_y + 8, 34, 34), on_tap=lambda: None),
-            El('TextField', label='Message', value=draft or 'iMessage', frame=(56, bar_y + 6, 290, 38),
+            El('TextField', label=self.t('Message'), value=draft or 'iMessage', frame=(56, bar_y + 6, 290, 38),
                on_tap=lambda: self._focus(field_id)),
-            El('Button', label='Send', frame=(352, bar_y + 8, 34, 34), enabled=bool(draft),
+            El('Button', label=self.t('Send'), frame=(352, bar_y + 8, 34, 34), enabled=bool(draft),
                on_tap=lambda: self._send(contact)),
         )
         return [self._nav_bar(contact, back='Messages'), bubbles, compose]
