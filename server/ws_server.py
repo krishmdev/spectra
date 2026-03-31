@@ -25,13 +25,9 @@ import time
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from core.agent import run_agent
-from core.executor import Executor
 from core.gates import ConfirmationGate
 from core.memory import AgentMemory
-from core.plan_preview import PlanPreview
 from core.planner import make_planner
-from core.router import TaskRouter
 from core.scheduler import Scheduler
 from core.takeover import TakeoverManager
 
@@ -386,6 +382,34 @@ def _run_safari_task_in_thread(
         state.task_running = False
 
 
+class WSCallbacks:
+    """SessionCallbacks over one WebSocket connection (see core/session.py)."""
+
+    def __init__(self, state: ConnectionState):
+        self._state = state
+        self._ask = WSAskUser(state.send, state.ask_event, state.ask_result)
+
+    def event(self, msg: dict) -> None:
+        self._state.send(msg)
+
+    def confirm(self, action: str, label: str, detail: str) -> bool:
+        raise NotImplementedError('the WS server passes its own WSConfirmationGate')
+
+    def approve_plan(self, task: str, steps: list[str]):
+        state = self._state
+        state.send({'type': 'plan_preview', 'steps': steps, 'task': task})
+        # Wait for plan_approve from client
+        state.plan_event.clear()
+        state.plan_event.wait()
+        return state.plan_result.get('approved', False), state.plan_result.get('modified_steps')
+
+    def ask(self, question: str, options: list[str]) -> str:
+        return self._ask.ask(question, options)
+
+    def handoff(self, reason: str) -> None:
+        raise NotImplementedError('the WS server passes its own WSTakeoverManager')
+
+
 def _run_task_in_thread(
     task: str,
     plan_steps: list[str] | None,
@@ -395,207 +419,40 @@ def _run_task_in_thread(
 ) -> None:
     """Execute the full route → plan → agent flow in a thread."""
     import traceback
+
+    from core.session import run_session
     print(f"[ws] Task thread started: {task!r}")
     # Pause observer during task to avoid doubling WDA source() calls
     if _observer is not None:
         _observer.paused = True
-    recorder = None
     try:
-        from recorder.recorder import Recorder
-        safe_task = "".join(c if c.isalnum() else "_" for c in task)[:40]
-        filename = f"flows/{int(time.time())}_{safe_task}.spectra"
-        recorder = Recorder(filename, task=task)
-
-        planner = make_planner()
-        gate = WSConfirmationGate(state.send, state.confirm_event, state.confirm_result)
-
-        # 0. Check for exact saved workflow to fast-forward
-        from core.workflow_matcher import find_matching_workflow
-        print("[ws] Checking for matching workflow...")
-        match_id = find_matching_workflow(task, planner, exclude=filename)
-        if match_id:
-            print(f"[ws] Found exact match: {match_id}. Fast-forwarding.")
-            state.send({
-                'type': 'status',
-                'step': 0,
-                'total': 0,
-                'action': 'fast_forward',
-                'detail': 'Found exact saved workflow — fast-forwarding...',
-                'app': 'Spectra',
-            })
-            
-            def replay_callback(step, total, action, success, detail):
-                state.send({
-                    'type': 'status',
-                    'step': step,
-                    'total': total,
-                    'action': action,
-                    'detail': f"{'✅' if success else '❌'} {detail}",
-                    'app': '',
-                })
-                
-            from recorder.replayer import Replayer
-            # Replays go through the same confirmation gate as live runs, and a step
-            # whose element can't be found confidently is handed to the planner.
-            gate.set_task(task)
-            replayer = Replayer(match_id, wda_url=wda_url, step_delay=0.4, gate=gate, planner=planner)
-            report = replayer.run(step_callback=replay_callback)
-            
-            if report.failed == 0:
-                print(f"[ws] Replay successful ({report.passed} steps).")
-                state.send({
-                    'type': 'done',
-                    'success': True,
-                    'summary': f'Completed via fast-forward replay: {task}',
-                    'steps': report.passed,
-                    'duration': round(report.duration, 1),
-                })
-                # Delete the empty recorder file we just created for this run
-                if recorder:
-                    recorder.close()
-                    import os
-                    try:
-                        os.remove(recorder._filepath)
-                    except Exception:
-                        pass
-                    recorder = None
-                return
-            else:
-                print(f"[ws] Replay failed at a step ({report.failed} failures). Resuming with LLM agent.")
-                state.send({
-                    'type': 'status',
-                    'step': 0,
-                    'total': 0,
-                    'action': 'fallback',
-                    'detail': 'Screen structure shifted or drifted. Falling back to intelligent LLM execution...',
-                    'app': 'Spectra',
-                })
-        router = TaskRouter(planner)
-        executor = Executor(wda_url)
-
-        takeover = WSTakeoverManager(state.send, state.takeover_event)
-        memory = WSAgentMemory(state.send)
-        ask_user = WSAskUser(state.send, state.ask_event, state.ask_result)
-
-        # 1. Route
-        print("[ws] Routing task...")
-        route = router.route(task)
-        refined = route['refined_task']
-        gate.set_task(refined)
-
-        # Decide max_steps based on task complexity
-        if max_steps is None:
-            task_lower = refined.lower()
-            multi_part = route.get('multi_app') or route.get('comparison')
-            has_conjunctions = any(w in task_lower for w in [' and ', ' then ', ' after that', ' also '])
-            if multi_part or has_conjunctions:
-                max_steps = 25
-            else:
-                max_steps = 15
-        print(f"[ws] Route: {route['category']} → {[a['name'] for a in route.get('apps', [])]} (max_steps={max_steps})")
-
-        # 2. Plan preview for complex tasks
-        if plan_steps is None and (route['multi_app'] or route.get('comparison')):
-            preview = PlanPreview(planner)
-            steps = preview.generate_plan(refined)
-            state.send({
-                'type': 'plan_preview',
-                'steps': steps,
-                'task': refined,
-            })
-            # Wait for plan_approve from client
-            state.plan_event.clear()
-            state.plan_event.wait()
-            if state.stop_event.is_set():
-                return
-            if not state.plan_result.get('approved', False):
-                state.send({'type': 'done', 'success': False, 'summary': 'Plan rejected', 'steps': 0, 'duration': 0})
-                return
-            plan_steps = state.plan_result.get('modified_steps') or steps
-
-        # 3. Step callback — sends status messages
-        t_start = time.monotonic()
-        step_counter = [0]
-
-        def step_callback(step, total, action_name, action_input, result, current_app, ref_map, tree):
-            step_counter[0] = step
-            if recorder:
-                recorder.record(step, action_name, action_input, ref_map, tree)
-            detail = action_input.get('reasoning', action_input.get('summary', ''))
-            state.send({
-                'type': 'status',
-                'step': step,
-                'total': total,
-                'action': action_name,
-                'detail': str(result) if not detail else detail,
-                'app': current_app,
-            })
-
-        # 4. Run agent for each target app (or once if no specific app)
-        apps = route.get('apps') or []
-        success = False
-
-        if not apps:
-            success = run_agent(
-                refined,
-                max_steps=max_steps,
-                wda_url=wda_url,
-                verbose=True,
-                agent_memory=memory,
-                plan_steps=plan_steps,
-                stop_check=state.stop_event.is_set,
-                gate=gate,
-                takeover=takeover,
-                step_callback=step_callback,
-                ask_user_fn=ask_user.ask,
-                planner=planner,
-            )
-        else:
-            for app_info in apps:
-                gate.current_app_bundle = app_info['bundle_id']
-                executor.open_app(app_info['bundle_id'])
-                if recorder:
-                    # The router's launch is part of the flow; without it a replay starts on
-                    # whatever screen happens to be up.
-                    recorder.record(0, 'open_app', {'bundle_id': app_info['bundle_id']}, {}, '')
-                success = run_agent(
-                    refined,
-                    max_steps=max_steps,
-                    wda_url=wda_url,
-                    verbose=True,
-                    agent_memory=memory,
-                    plan_steps=plan_steps,
-                    stop_check=state.stop_event.is_set,
-                    gate=gate,
-                    takeover=takeover,
-                    step_callback=step_callback,
-                    ask_user_fn=ask_user.ask,
-                    planner=planner,
-                )
-                if state.stop_event.is_set():
-                    break
-
-        elapsed = time.monotonic() - t_start
-        memory.clear()
-
-        if state.stop_event.is_set():
-            state.send({'type': 'done', 'success': False, 'summary': 'Stopped by user', 'steps': 0, 'duration': round(elapsed, 1)})
+        result = run_session(
+            task, WSCallbacks(state), wda_url=wda_url, planner=make_planner(), plan_steps=plan_steps,
+            max_steps=max_steps,
+            gate=WSConfirmationGate(state.send, state.confirm_event, state.confirm_result),
+            takeover=WSTakeoverManager(state.send, state.takeover_event),
+            memory=WSAgentMemory(state.send),
+            stop_check=state.stop_event.is_set,
+        )
+        if result.plan_rejected:
+            state.send({'type': 'done', 'success': False, 'summary': 'Plan rejected', 'steps': 0, 'duration': 0})
+        elif result.stopped:
+            state.send({'type': 'done', 'success': False, 'summary': 'Stopped by user', 'steps': 0,
+                        'duration': result.duration})
             _send_sim_push('Stopped', 'Task was stopped by user.')
-        elif success:
-            summary = f'Completed: {task}'
-            state.send({'type': 'done', 'success': True, 'summary': summary, 'steps': step_counter[0], 'duration': round(elapsed, 1)})
-            _send_sim_push('Task Complete', f'{summary} ({step_counter[0]} steps, {round(elapsed, 1)}s)')
+        elif result.success:
+            state.send({'type': 'done', 'success': True, 'summary': result.summary, 'steps': result.steps,
+                        'duration': result.duration})
+            if not result.replayed:
+                _send_sim_push('Task Complete', f'{result.summary} ({result.steps} steps, {result.duration}s)')
         else:
-            state.send({'type': 'stuck', 'reason': 'Agent could not complete the task'})
+            state.send({'type': 'stuck', 'reason': result.summary})
             _send_sim_push('Task Stuck', 'Agent could not complete the task.')
-
     except Exception as e:
         print(f"[ws] ERROR in task thread: {e}")
         traceback.print_exc()
         state.send({'type': 'error', 'message': str(e)})
     finally:
-        if recorder:
-            recorder.close()
         # Check WDA health after task — restart if degraded
         try:
             _check_and_restart_wda(wda_url)
