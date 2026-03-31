@@ -4,6 +4,7 @@ import pytest
 from core.agent import run_agent
 from core.gates import ConfirmationGate
 from core.scripted_planner import ScriptedPlanner
+from sim.checks import check
 from sim.script_engine import load_scenarios
 
 SCENARIOS = load_scenarios()
@@ -19,23 +20,6 @@ class RecordingGate(ConfirmationGate):
         return True
 
 
-def _succeeded(sc, state):
-    ok = sc['success']
-    if ok['type'] == 'appearance':
-        return state['appearance'] == ok['value']
-    if ok['type'] == 'reminder':
-        return state['reminders'].count(ok['title']) == ok['count']
-    if ok['type'] == 'message':
-        mine = [m['text'] for m in state['threads'][ok['contact']] if m['from'] == 'me']
-        needle = ok.get('contains') or state_price(state, ok['contains_stock'])
-        return len(mine) == ok['count'] and needle in mine[-1]
-    raise AssertionError(ok)
-
-
-def state_price(state, symbol):
-    return next(s['price'] for s in state['stocks'] if s['symbol'] == symbol)
-
-
 @pytest.mark.parametrize('seed', [0, 1, 2])
 @pytest.mark.parametrize('scenario_id', sorted(SCENARIOS))
 def test_scenario_completes(mock_device, scenario_id, seed):
@@ -46,7 +30,8 @@ def test_scenario_completes(mock_device, scenario_id, seed):
     done = run_agent(sc['task'], wda_url=mock_device.url, verbose=False, planner=planner, gate=gate)
     state = mock_device.device.state()
     assert done
-    assert _succeeded(sc, state), state
+    passed, reason = check(sc, state)
+    assert passed, reason
     if scenario_id in ('messages_text_mom', 'stocks_to_messages'):
         # "send" is a gated label and neither task says "send", so the user is asked once
         assert gate.asked == ['Send']
