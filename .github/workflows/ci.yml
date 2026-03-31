@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the eval contract test extracts the v0.1-yhack tag
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.5"
+      - run: uv sync --frozen
+      - run: make lint
+      - run: make test
+
+  offline-runtime:
+    # Tests + keyless demo inside a container with no network at all (loopback only).
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: docker build -t spectra-ci .
+      - run: >
+          docker run --rm --network none
+          -e SPECTRA_OFFLINE=1 -e SPECTRA_EGRESS_CANARY=1
+          spectra-ci sh -c "python -m pytest -q && python scripts/demo.py"
