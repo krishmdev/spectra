@@ -272,3 +272,44 @@ class TestKeyboardSkipped:
         assert 'Key' not in text.split('"')  # avoid matching inside quoted labels
         assert len(ref_map) == 1
         assert ref_map[1]['label'] == 'Search'
+
+
+class TestV2Serializer:
+    """Changes made after the bench/tree_tokens.py numbers."""
+
+    XML = _wrap('''
+        <XCUIElementTypeStaticText label="APPEARANCE" value="APPEARANCE" visible="true" x="32" y="166" width="200" height="18"/>
+        <XCUIElementTypeCell name="Bold Text" label="Bold Text" visible="true" x="16" y="200" width="370" height="52">
+            <XCUIElementTypeStaticText label="Bold Text" value="Bold Text" visible="true" x="72" y="215" width="200" height="22"/>
+            <XCUIElementTypeSwitch name="Bold Text" label="Bold Text" value="0" visible="true" x="320" y="210" width="51" height="31"/>
+        </XCUIElementTypeCell>
+        <XCUIElementTypeCell name="Night Shift" label="Night Shift" value="Off" visible="true" x="16" y="252" width="370" height="52">
+            <XCUIElementTypeStaticText label="Off" value="Off" visible="true" x="270" y="267" width="80" height="22"/>
+        </XCUIElementTypeCell>
+        <XCUIElementTypeButton name="ghost" label="Ghost" visible="true" x="0" y="0" width="0" height="0"/>
+        <XCUIElementTypeButton name="com.apple.settings.done" label="Done" visible="true" x="300" y="60" width="60" height="44"/>
+    ''')
+
+    def test_standalone_text_is_kept_without_a_ref(self):
+        text, ref_map, _ = parse_tree(self.XML)
+        assert text.splitlines()[0] == 'Text "APPEARANCE"'
+        assert all(e['label'] != 'APPEARANCE' for e in ref_map.values())
+
+    def test_text_already_in_a_parent_label_or_value_is_not_repeated(self):
+        text, _, _ = parse_tree(self.XML)
+        assert 'Text "Bold Text"' not in text
+        assert 'Text "Off"' not in text
+
+    def test_child_with_parent_label_drops_the_repeat(self):
+        text, ref_map, _ = parse_tree(self.XML)
+        assert '  [2] Switch → "0"' in text.splitlines()
+        assert ref_map[2]['label'] == 'Bold Text'  # the ref map keeps it for replay matching
+
+    def test_zero_size_elements_are_skipped(self):
+        _, ref_map, _ = parse_tree(self.XML)
+        assert 'Ghost' not in [e['label'] for e in ref_map.values()]
+
+    def test_identifier_is_kept_when_it_differs_from_label(self):
+        _, ref_map, _ = parse_tree(self.XML)
+        done = next(e for e in ref_map.values() if e['label'] == 'Done')
+        assert done['identifier'] == 'com.apple.settings.done'

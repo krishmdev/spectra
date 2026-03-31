@@ -51,7 +51,25 @@ def _display_name(tag: str) -> str:
     return TYPE_SHORT_NAMES.get(tag, _short_type(tag))
 
 
-def _walk(element, depth, counter, lines, ref_map):
+def _zero_size(element) -> bool:
+    """Zero-size elements are logical groupings with nothing to tap (PRD 10.2)."""
+    try:
+        w = float(element.get('width', 1))
+        h = float(element.get('height', 1))
+    except ValueError:
+        return False
+    return w <= 0 or h <= 0
+
+
+def _walk(element, depth, counter, lines, ref_map, above=(), seen_text=None):
+    """Emit kept elements with refs, plus standalone text without refs.
+
+    `above` holds the labels of kept ancestors. A kept child with exactly its
+    parent's label (Switch "Bold Text" inside Cell "Bold Text") is printed
+    without repeating it, and static text is
+    only printed when no ancestor label contains it (section headers, alert
+    bodies, screen titles that aren't in a NavBar).
+    """
     tag = element.tag
     short = _short_type(tag)
 
@@ -65,6 +83,15 @@ def _walk(element, depth, counter, lines, ref_map):
     # CollectionView, etc.) may be marked visible="false" by WDA even when their
     # children are visible, so we always recurse through them.
     if element.get('visible') == 'false' and keep:
+        return
+    if keep and _zero_size(element):
+        return
+
+    if short == 'StaticText' and seen_text is not None and element.get('visible') != 'false':
+        text = (element.get('value') or element.get('label') or element.get('name') or '').strip()
+        if text and text not in seen_text and not any(text in a for a in above):
+            seen_text.add(text)
+            lines.append(f'{"  " * depth}Text "{text[:160]}"')
         return
 
     if keep:
@@ -81,7 +108,7 @@ def _walk(element, depth, counter, lines, ref_map):
         indent = '  ' * depth
         display = _display_name(tag)
         line = f'{indent}[{ref}] {display}'
-        if label:
+        if label and not (above and label == above[-1]):
             line += f' "{label}"'
         if value and value != label:
             line += f' \u2192 "{value}"'
@@ -101,20 +128,24 @@ def _walk(element, depth, counter, lines, ref_map):
             'type': tag,
             'label': label,
             'value': value,
-            'x': int(element.get('x', 0)),
-            'y': int(element.get('y', 0)),
-            'width': int(element.get('width', 0)),
-            'height': int(element.get('height', 0)),
+            'x': int(float(element.get('x', 0))),
+            'y': int(float(element.get('y', 0))),
+            'width': int(float(element.get('width', 0))),
+            'height': int(float(element.get('height', 0))),
         }
+        if element.get('name') and element.get('name') != label:
+            ref_map[ref]['identifier'] = element.get('name')
 
         # Recurse children with increased depth
         child_depth = depth + 1
+        child_above = (*above, *(t for t in (value, label) if t))
     else:
         # Transparent: recurse children at same depth
         child_depth = depth
+        child_above = above
 
     for child in element:
-        _walk(child, child_depth, counter, lines, ref_map)
+        _walk(child, child_depth, counter, lines, ref_map, child_above, seen_text)
 
 
 def parse_tree(xml_string: str) -> tuple[str, dict, str]:
@@ -136,7 +167,8 @@ def parse_tree(xml_string: str) -> tuple[str, dict, str]:
     counter = [0]
 
     # The root element is typically XCUIElementTypeApplication — treat it as transparent
+    seen_text: set[str] = set()
     for child in root:
-        _walk(child, 0, counter, lines, ref_map)
+        _walk(child, 0, counter, lines, ref_map, (), seen_text)
 
     return '\n'.join(lines), ref_map, app_name
