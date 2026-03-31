@@ -2,7 +2,7 @@ PY ?= .venv/bin/python
 OFFLINE = scripts/offline-run
 LEASE ?= <local>
 
-.PHONY: setup lint test test-offline demo demo-offline e2e-offline canary-check bench-live bench-learning bench-tree
+.PHONY: setup lint test demo demo-offline e2e-offline canary-check bench-live bench-live-check bench-learning bench-tree bench-replay
 
 setup:            ## install locked deps (needs network)
 	uv sync --frozen
@@ -26,15 +26,24 @@ e2e-offline:      ## full test suite + demo, sandboxed, keys unset, canaries on
 canary-check:     ## companion check: the canary does connect when NOT sandboxed
 	SPECTRA_NETWORK_TESTS=1 $(PY) -m pytest -q tests/test_egress_canary.py
 
-bench-live:       ## live Gemini eval, v0.1-yhack vs HEAD (needs GEMINI_API_KEY; never in CI)
-	$(PY) $(LEASE) run spectra-eval -- $(PY) -m bench.run_suite \
-	  --arm v0.1-yhack=git:v0.1-yhack --arm head=. --seeds 0,1,2 --backend live \
+ARMS = --arm v0.1-yhack=git:v0.1-yhack \
+       --arm v0.1-yhack+cachefix=git:v0.1-yhack@bench/patches/v0.1-cachefix.patch \
+       --arm head=.
+
+bench-live:       ## live Gemini eval, v0.1-yhack vs +cachefix vs HEAD (needs GEMINI_API_KEY; never in CI)
+	$(PY) $(LEASE) run spectra-eval -- $(PY) -m bench.run_suite $(ARMS) --seeds 0,1,2 --backend live \
 	  --out bench/results/live-paired
+
+bench-live-check: ## the same command against sim/fake_gemini.py: a harness check, not a result
+	$(PY) -m bench.run_suite $(ARMS) --seeds 0,1,2 --backend fake --out bench/runs/live-harness-check
 
 bench-learning:   ## live learning-sequence experiment (memory persists across tasks)
 	$(PY) $(LEASE) run spectra-eval -- $(PY) -m bench.run_suite \
-	  --arm v0.1-yhack=git:v0.1-yhack --arm head=. --seeds 0,1 --backend live --experiment learning \
+	  $(ARMS) --seeds 0,1 --backend live --experiment learning \
 	  --out bench/results/live-learning
 
 bench-tree:       ## tree serialization benchmark (offline; adds Gemini token counts if a key is set)
 	$(PY) -m bench.tree_tokens --out bench/results/tree-tokens
+
+bench-replay:     ## replay/self-healing benchmark on the mock device (offline)
+	$(PY) -m bench.replay_heal --out bench/results/replay-heal

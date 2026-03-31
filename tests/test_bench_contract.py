@@ -56,3 +56,34 @@ def test_learning_sequence_carries_state_between_tasks(tmp_path):
     assert rows[1]['initial']['flows_sha256'] != rows[0]['initial']['flows_sha256']
     assert rows[2]['replayed'] and rows[3]['replayed']
     assert all(r['success'] for r in rows)
+
+
+def test_agent_claiming_done_is_not_success(tmp_path):
+    rows, _ = _run(tmp_path, '--arm', 'head=.', '--seeds', '0', '--backend', 'scripted',
+                   '--scenario-dir', os.path.join(REPO, 'tests', 'fixtures', 'liar_scenarios'))
+    assert rows[0]['agent_done'] is True
+    assert rows[0]['success'] is False
+
+
+@pytest.mark.skipif(not _has_tag('v0.1-yhack'), reason='needs the v0.1-yhack tag (fetch tags)')
+def test_scripted_backend_refuses_trees_without_a_scripted_planner(tmp_path):
+    proc = subprocess.run([sys.executable, '-m', 'bench.run_suite', '--arm', 'old=git:v0.1-yhack',
+                           '--backend', 'scripted', '--out', str(tmp_path / 'o')], cwd=REPO,
+                          capture_output=True, text=True)
+    assert proc.returncode != 0 and 'scripted_planner' in proc.stderr
+
+
+@pytest.mark.skipif(not _has_tag('v0.1-yhack'), reason='needs the v0.1-yhack tag (fetch tags)')
+def test_cachefix_arm_is_the_tag_plus_one_patch(tmp_path):
+    rows, manifest = _run(tmp_path, '--arm', 'v0.1-yhack=git:v0.1-yhack',
+                          '--arm', 'v0.1-yhack+cachefix=git:v0.1-yhack@bench/patches/v0.1-cachefix.patch',
+                          '--seeds', '0', '--scenarios', 'settings_dark_mode', '--backend', 'fake')
+    arms = {a['name']: a for a in manifest['run']['arms']}
+    assert arms['v0.1-yhack']['code_sha256'] != arms['v0.1-yhack+cachefix']['code_sha256']
+    assert arms['v0.1-yhack+cachefix']['patch'] == 'bench/patches/v0.1-cachefix.patch'
+    by_arm = {r['arm']: r for r in rows}
+    # the fake endpoint says "match" for the same task, so only the unpatched tree fast-forwards
+    assert by_arm['v0.1-yhack']['replayed'] and not by_arm['v0.1-yhack']['success']
+    assert not by_arm['v0.1-yhack+cachefix']['replayed'] and by_arm['v0.1-yhack+cachefix']['success']
+    assert manifest['run']['libraries']['google-genai']
+    assert all('device_loops' in r for r in rows)

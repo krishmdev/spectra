@@ -21,6 +21,11 @@ State contract, per trial and identical for every arm:
 directory per arm persists across an ordered scenario sequence, so lessons and
 recorded flows carry over. The device is still reset before every task.
 
+An arm spec can add a patch: NAME=git:REF@bench/patches/x.patch. The default
+live run uses that for a third arm, v0.1-yhack+cachefix: the tag plus only the
+workflow-cache fix (a06eab9), so one bug fix and the rest of v0.2 show up
+separately.
+
 Backends: live (Gemini, needs GEMINI_API_KEY), fake (sim/fake_gemini.py, a
 harness check only), scripted (ScriptedPlanner; HEAD only).
 """
@@ -55,8 +60,11 @@ LEARNING_SEQUENCE = ['settings_dark_mode', 'reminders_add', 'messages_text_mom',
 
 
 def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
     with open(path, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        for chunk in iter(lambda: f.read(1 << 16), b''):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def sha256_dir(path: str) -> str:
@@ -90,10 +98,13 @@ def http_json(url: str, body: dict | None = None) -> dict:
 
 # --- arms ---------------------------------------------------------------------
 
-def resolve_arm(spec: str, workdir: str) -> dict:
+def resolve_arm(spec: str, workdir: str, allow_dirty: bool = True) -> dict:
     name, _, where = spec.partition('=')
     if not where:
-        raise SystemExit(f'--arm expects NAME=PATH or NAME=git:REF, got {spec!r}')
+        raise SystemExit(f'--arm expects NAME=PATH or NAME=git:REF[@patch], got {spec!r}')
+    where, _, patch = where.partition('@')
+    if patch and not where.startswith('git:'):
+        raise SystemExit('patches only apply to git:REF arms')
     if where.startswith('git:'):
         ref = where[4:]
         sha = git('rev-parse', f'{ref}^{{commit}}')
@@ -102,18 +113,32 @@ def resolve_arm(spec: str, workdir: str) -> dict:
         archive = subprocess.run(['git', 'archive', sha], cwd=REPO, capture_output=True, check=True).stdout
         subprocess.run(['tar', '-x', '-C', dest], input=archive, check=True)
         root, source = dest, {'git_ref': ref, 'commit': sha, 'dirty': False}
+        if patch:
+            patch_path = os.path.join(REPO, patch)
+            subprocess.run(['patch', '-p1', '-s', '-d', dest, '-i', patch_path], check=True)
+            source.update(patch=patch, patch_sha256=sha256_file(patch_path))
     else:
         root = os.path.abspath(where)
         try:
             sha = git('rev-parse', 'HEAD', cwd=root)
-            dirty = bool(git('status', '--porcelain', '--untracked-files=no', cwd=root))
+            diff = subprocess.run(['git', 'diff', 'HEAD'], cwd=root, capture_output=True, check=True).stdout
         except subprocess.CalledProcessError:
-            sha, dirty = None, None
-        source = {'path': root, 'commit': sha, 'dirty': dirty}
+            sha, diff = None, b''
+        if diff and not allow_dirty:
+            raise SystemExit(f'arm {name} ({root}) has uncommitted changes; commit them or pass --allow-dirty')
+        source = {'path': root, 'commit': sha, 'dirty': bool(diff),
+                  'diff_sha256': hashlib.sha256(diff).hexdigest() if diff else None}
     code = os.path.join(root, 'spectra') if os.path.isdir(os.path.join(root, 'spectra', 'core')) else root
     if not os.path.isfile(os.path.join(code, 'server', 'ws_server.py')):
         raise SystemExit(f'{code} does not look like a Spectra tree')
-    return {'name': name, 'code': code, 'layout': 'spectra/ subfolder' if code != root else 'root', **source}
+    arm = {'name': name, 'code': code, 'layout': 'spectra/ subfolder' if code != root else 'root',
+           'has_scripted_planner': os.path.isfile(os.path.join(code, 'core', 'scripted_planner.py')), **source}
+    # Hash what a trial actually runs (the filtered copy), not the checkout with its .venv and .git.
+    snapshot = os.path.join(workdir, 'hash', name)
+    shutil.copytree(code, snapshot, ignore=COPY_IGNORE)
+    arm['code_sha256'] = sha256_dir(snapshot)
+    shutil.rmtree(snapshot, ignore_errors=True)
+    return arm
 
 
 def prepare_trial(arm: dict, trial_dir: str) -> dict:
@@ -163,20 +188,29 @@ def run_trial(arm, scenario, seed, paths, env, sim_url, timeout, out_dir, tag) -
             res = {'error': f'runner produced no result: {e}'}
     row['harness_seconds'] = round(time.monotonic() - t0, 2)
     final = http_json(f'{sim_url}/_sim/state')
+    row['device_loops'] = http_json(f'{sim_url}/_sim/events')['loops']
     passed, reason = check(scenario, final)
     row.update(success=passed, check=reason, final_device_state_hash=final['hash'])
     row.update({k: res.get(k) for k in (
         'agent_done', 'agent_stuck', 'error', 'steps', 'confirmations', 'plan_previews', 'replayed',
         'llm_calls', 'llm_errors', 'llm_error_samples', 'prompt_tokens', 'cached_tokens', 'output_tokens',
-        'thought_tokens', 'cache_creates', 'stuck_warnings', 'hard_stuck', 'wall_seconds', 'egress_canary')})
+        'thought_tokens', 'cache_creates', 'stuck_warnings', 'hard_stuck', 'wall_seconds', 'egress_canary',
+        'perception_modes')})
+    samples = ' '.join(res.get('llm_error_samples') or []) + ' ' + str(res.get('error') or '')
+    row['rate_limited'] = '429' in samples or 'RESOURCE_EXHAUSTED' in samples
     row['after'] = state_hashes(paths)
     row['lessons_after'] = len(json.load(open(os.path.join(paths['code'], 'data', 'lessons.json'))))
     row['flows_after'] = len([f for f in os.listdir(os.path.join(paths['code'], 'flows')) if f.endswith('.spectra')])
     return row
 
 
-def backend_env(backend: str, fake_url: str | None) -> dict:
-    env = {k: v for k, v in os.environ.items() if k not in ('GOOGLE_GEMINI_BASE_URL', 'SPECTRA_PLANNER')}
+HOST_VARS = ('GOOGLE_GEMINI_BASE_URL', 'SPECTRA_PLANNER', 'WDA_PROJ', 'SIM_UDID', 'SIM_DEVICE', 'SPECTRA_WDA_URL')
+
+
+def backend_env(backend: str, fake_url: str | None, scenario_dir: str) -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in HOST_VARS}
+    # HEAD restarts WDA after a slow task; never let a trial pkill or xcodebuild on this host.
+    env['WDA_PROJ'] = '/nonexistent'
     env['PATH'] = SIM_BIN + os.pathsep + env.get('PATH', '')
     if backend == 'live':
         if not env.get('GEMINI_API_KEY'):
@@ -187,7 +221,7 @@ def backend_env(backend: str, fake_url: str | None) -> dict:
     elif backend == 'scripted':
         env.pop('GEMINI_API_KEY', None)
         env['SPECTRA_PLANNER'] = 'scripted'
-        env['SPECTRA_SCENARIOS'] = os.path.join(REPO, 'sim', 'scenarios')
+        env['SPECTRA_SCENARIOS'] = scenario_dir
     return env
 
 
@@ -203,10 +237,32 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def _agg(rs: list[dict]) -> dict:
-    def mean(key):
-        vals = [r[key] for r in rs if isinstance(r.get(key), (int, float))]
+    """Success over all trials; cost only over trials that ran the agent loop.
+
+    A replayed trial (workflow-cache fast-forward) makes few or no model calls,
+    so averaging it with agent-loop trials would hide what the loop costs.
+    """
+    loop = [r for r in rs if not r.get('replayed')]
+    wins = [r for r in loop if r['success']]
+
+    def mean(key, over=loop):
+        vals = [r[key] for r in over if isinstance(r.get(key), (int, float))]
         return round(sum(vals) / len(vals), 2) if vals else None
+
+    def per_success(key):
+        return round(sum(r.get(key) or 0 for r in loop) / len(wins), 1) if wins else None
     return {
+        'agent_loop_trials': len(loop),
+        'replayed_trials': len(rs) - len(loop),
+        'replayed_successes': sum(r['success'] for r in rs if r.get('replayed')),
+        'agent_loop_successes': len(wins),
+        'llm_calls_per_success': per_success('llm_calls'),
+        'prompt_tokens_per_success': per_success('prompt_tokens'),
+        'wall_seconds_per_success': per_success('wall_seconds'),
+        'device_loop_events': sum((r.get('device_loops') or {}).get('total', 0) for r in rs),
+        'cache_creates': sum(r.get('cache_creates') or 0 for r in rs),
+        'rate_limited': sum(bool(r.get('rate_limited')) for r in rs),
+        'stuck_warnings_diagnostic': sum(r.get('stuck_warnings') or 0 for r in rs),
         'trials': len(rs),
         'successes': sum(bool(r['success']) for r in rs),
         'success_rate': round(sum(bool(r['success']) for r in rs) / len(rs), 3) if rs else None,
@@ -216,7 +272,6 @@ def _agg(rs: list[dict]) -> dict:
         'mean_prompt_tokens': mean('prompt_tokens'),
         'mean_output_tokens': mean('output_tokens'),
         'mean_wall_seconds': mean('wall_seconds'),
-        'stuck_warnings': sum(r.get('stuck_warnings') or 0 for r in rs),
         'hard_stuck': sum(r.get('hard_stuck') or 0 for r in rs),
         'errors': sum(1 for r in rs if r.get('error')),
         'replayed': sum(bool(r.get('replayed')) for r in rs),
@@ -226,13 +281,18 @@ def _agg(rs: list[dict]) -> dict:
 def write_markdown(path: str, summary: dict, meta: dict) -> None:
     lines = [f"# {meta['experiment']} run: {meta['backend']} backend", '',
              f"Seeds {meta['seeds']}, scenarios {', '.join(meta['scenarios'])}. Generated by bench/run_suite.py.", '',
-             '| arm | scenario | success | steps | LLM calls | prompt tokens | wall s | stuck warnings |',
-             '|---|---|---|---|---|---|---|---|']
+             'Cost columns are means over agent-loop trials (replayed trials excluded); per-success '
+             'columns divide agent-loop totals by agent-loop successes. Device loop events come from the '
+             "mock device's own log, so they are comparable across arms.", '',
+             '| arm | scenario | success | replayed | steps | LLM calls | prompt tokens | wall s | '
+             'calls/success | tokens/success | device loop events |',
+             '|---|---|---|---|---|---|---|---|---|---|---|']
     for arm, s in summary.items():
         for sid, a in list(s['by_scenario'].items()) + [('all', s['overall'])]:
-            lines.append(f"| {arm} | {sid} | {a['successes']}/{a['trials']} | {a['mean_steps']} | "
-                         f"{a['mean_llm_calls']} | {a['mean_prompt_tokens']} | {a['mean_wall_seconds']} | "
-                         f"{a['stuck_warnings']} |")
+            lines.append(f"| {arm} | {sid} | {a['successes']}/{a['trials']} | {a['replayed_trials']} | "
+                         f"{a['mean_steps']} | {a['mean_llm_calls']} | {a['mean_prompt_tokens']} | "
+                         f"{a['mean_wall_seconds']} | {a['llm_calls_per_success']} | "
+                         f"{a['prompt_tokens_per_success']} | {a['device_loop_events']} |")
     with open(path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
 
@@ -260,24 +320,31 @@ def main(argv=None) -> int:
     ap.add_argument('--timeout', type=int, default=300)
     ap.add_argument('--out', required=True)
     ap.add_argument('--keep-trials', action='store_true', help='keep the per-trial copies for debugging')
+    ap.add_argument('--scenario-dir', default=os.path.join(REPO, 'sim', 'scenarios'))
+    ap.add_argument('--allow-dirty', action='store_true', help='allow uncommitted changes in a path arm (live)')
+    ap.add_argument('--pace', type=float, default=None, help='seconds between trials (default 2 for live)')
     args = ap.parse_args(argv)
+    pace = args.pace if args.pace is not None else (2.0 if args.backend == 'live' else 0.0)
 
-    scenarios = load_scenarios(os.path.join(REPO, 'sim', 'scenarios'))
+    scenarios = load_scenarios(args.scenario_dir)
     ids = [s for s in args.scenarios.split(',') if s] or sorted(scenarios)
     seeds = [int(s) for s in args.seeds.split(',') if s]
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
     work = tempfile.mkdtemp(prefix='spectra-bench-')
 
-    arms = [resolve_arm(spec, work) for spec in args.arm]
-    for arm in arms:
-        arm['code_sha256'] = sha256_dir(arm['code'])
+    arms = [resolve_arm(spec, work, allow_dirty=args.allow_dirty or args.backend != 'live') for spec in args.arm]
+    if args.backend == 'scripted':
+        missing = [a['name'] for a in arms if not a['has_scripted_planner']]
+        if missing:
+            raise SystemExit(f'--backend scripted needs core/scripted_planner.py; missing in {missing}')
 
     fake = None
     if args.backend == 'fake':
         from sim.fake_gemini import serve_in_thread
-        fake, fake_url = serve_in_thread(0)
-    env = backend_env(args.backend, fake_url if fake else None)
+        from sim.script_engine import ScriptEngine
+        fake, fake_url = serve_in_thread(0, ScriptEngine(scenarios))
+    env = backend_env(args.backend, fake_url if fake else None, args.scenario_dir)
 
     port = free_port()
     sim_url = f'http://127.0.0.1:{port}'
@@ -311,6 +378,26 @@ def main(argv=None) -> int:
                         _progress(row)
                         if not args.keep_trials:
                             shutil.rmtree(trial_dir, ignore_errors=True)
+                        time.sleep(pace)
+            # A 429 in either arm reruns that (seed, scenario) pair for every arm, after a pause.
+            limited = sorted({(r['seed'], r['scenario']) for r in rows if r.get('rate_limited')})
+            if limited:
+                time.sleep(max(30.0, pace))
+                retired = [r for r in rows if (r['seed'], r['scenario']) in limited]
+                rows = [r for r in rows if (r['seed'], r['scenario']) not in limited]
+                with open(os.path.join(out_dir, 'trials_rate_limited.jsonl'), 'w') as f:
+                    for r in retired:
+                        f.write(json.dumps(r) + '\n')
+                for seed, sid in limited:
+                    for arm in arms:
+                        trial_dir = tempfile.mkdtemp(prefix=f'{arm["name"]}-', dir=work)
+                        paths = prepare_trial(arm, trial_dir)
+                        tag = f'{arm["name"]}__{sid}__seed{seed}__rerun'
+                        row = run_trial(arm, scenarios[sid], seed, paths, env, sim_url, args.timeout, out_dir, tag)
+                        row['rerun_after_429'] = True
+                        rows.append(row)
+                        _progress(row)
+                        time.sleep(pace)
         else:
             sequence = [s for s in LEARNING_SEQUENCE if s in ids]
             for arm in arms:
@@ -323,6 +410,7 @@ def main(argv=None) -> int:
                     row['position'] = pos
                     rows.append(row)
                     _progress(row)
+                    time.sleep(pace)
     finally:
         sim.terminate()
         sim.wait(timeout=10)
@@ -340,8 +428,9 @@ def main(argv=None) -> int:
         'started': started, 'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         'model': 'gemini-3-flash-preview (default in both arms)' if args.backend == 'live' else args.backend,
         'harness_commit': git('rev-parse', 'HEAD'),
+        'libraries': library_versions(),
         'arms': [{k: v for k, v in a.items() if k != 'code'} for a in arms],
-        'scenario_sha256': {sid: sha256_file(os.path.join(REPO, 'sim', 'scenarios', f'{sid}.json')) for sid in ids},
+        'scenario_sha256': {sid: sha256_file(os.path.join(args.scenario_dir, f'{sid}.json')) for sid in ids},
         'initial_state': {'lessons_sha256': sha256_file(os.path.join(INITIAL_STATE, 'lessons.json')),
                           'flows_sha256': sha256_dir(os.path.join(INITIAL_STATE, 'flows'))},
         'egress_canary_device': device_canary,
@@ -361,6 +450,20 @@ def main(argv=None) -> int:
     write_markdown(os.path.join(out_dir, 'summary.md'), summary, meta)
     print(json.dumps({a: s['overall'] for a, s in summary.items()}, indent=2))
     return 0
+
+
+def library_versions() -> dict:
+    # Both arms run on this interpreter and these packages. The v0.1 tree was written
+    # against google-genai 1.47.0 on Python 3.9; that difference is disclosed in the README.
+    import platform
+    from importlib.metadata import PackageNotFoundError, version
+    out = {'python': platform.python_version()}
+    for pkg in ('google-genai', 'facebook-wda', 'fastapi', 'pydantic', 'pillow'):
+        try:
+            out[pkg] = version(pkg)
+        except PackageNotFoundError:
+            out[pkg] = None
+    return out
 
 
 def _progress(row: dict) -> None:

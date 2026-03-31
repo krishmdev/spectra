@@ -116,8 +116,11 @@ class Handler(BaseHTTPRequestHandler):
             value = body.get('value', '')
             text = ''.join(value) if isinstance(value, list) else str(value)
             if not d.keys(text):
+                # Same wording as real WDA; facebook-wda keys its retry on this string.
                 return self._send({'error': 'invalid element state',
-                                   'message': 'Keyboard is not present'}, status=400)
+                                   'message': 'Error Domain=com.facebook.WebDriverAgent Code=1 '
+                                              '"The on-screen keyboard must be present to send keys"'},
+                                  status=400)
             return self._send(None)
         if path == '/wda/dragfromtoforduration' and method == 'POST':
             d.drag(float(body.get('fromX', 0)), float(body.get('fromY', 0)),
@@ -143,7 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(raw=d.state())
         if path == '/_sim/events':
             with d.lock:
-                return self._send(raw={'events': list(d.events)})
+                events = list(d.events)
+            return self._send(raw={'events': events, 'loops': d.loop_events()})
         if path == '/_sim/launch' and method == 'POST':
             ok = d.launch(body.get('bundle_id', ''))
             return self._send(raw={'ok': ok}, status=200 if ok else 404)

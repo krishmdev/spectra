@@ -13,7 +13,8 @@ def check(scenario: dict, state: dict) -> tuple[bool, str]:
     if kind == 'appearance':
         return state['appearance'] == ok['value'], f"appearance={state['appearance']}"
     if kind == 'reminder':
-        n = state['reminders'].count(ok['title'])
+        want = ' '.join(ok['title'].split()).lower()
+        n = sum(1 for r in state['reminders'] if ' '.join(r.split()).lower() == want)
         return n == ok['count'], f"{n} reminder(s) titled {ok['title']!r}"
     if kind == 'message':
         mine = [m['text'] for m in state['threads'].get(ok['contact'], []) if m['from'] == 'me']

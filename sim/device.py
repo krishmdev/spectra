@@ -238,11 +238,11 @@ class Device:
                 self._log('edge_swipe')
                 return
             dy = y1 - y2
-            if abs(dy) < 20 or self.foreground == SPRINGBOARD:
-                return
             key = self.screen_id()
-            self.scroll[key] = max(0, min(self._max_scroll(key), self.scroll.get(key, 0) + int(dy)))
-            self._log('scroll', dy=dy, offset=self.scroll[key])
+            before = self.scroll.get(key, 0)
+            if abs(dy) >= 20 and self.foreground != SPRINGBOARD:
+                self.scroll[key] = max(0, min(self._max_scroll(key), before + int(dy)))
+            self._log('scroll', dy=dy, offset=self.scroll.get(key, 0), moved=self.scroll.get(key, 0) != before)
 
     def open_url(self, url: str) -> bool:
         with self.lock:
@@ -252,6 +252,30 @@ class Device:
     # ------------------------------------------------------------------
     # navigation helpers
     # ------------------------------------------------------------------
+
+    def loop_events(self) -> dict:
+        """Wasted device actions, counted the same way whichever agent produced them.
+
+        repeated_taps: a tap on the same element as the tap right before it, on
+        the same screen, with nothing else in between. noop_scrolls: scrolls that
+        didn't move anything. missed_taps: taps that hit no element.
+        """
+        with self.lock:
+            ev = list(self.events)
+        repeated = noop = missed = 0
+        prev = None
+        for e in ev:
+            if e['event'] == 'tap':
+                if e['target'] is None:
+                    missed += 1
+                elif prev and prev['event'] == 'tap' and prev['target'] == e['target'] \
+                        and prev['screen'] == e['screen']:
+                    repeated += 1
+            elif e['event'] == 'scroll' and not e.get('moved'):
+                noop += 1
+            prev = e
+        return {'repeated_taps': repeated, 'noop_scrolls': noop, 'missed_taps': missed,
+                'total': repeated + noop + missed, 'device_actions': len(ev)}
 
     def _push(self, screen: str) -> None:
         self.stack[self.foreground].append(screen)

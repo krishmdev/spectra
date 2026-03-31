@@ -23,16 +23,46 @@ import time
 import traceback
 
 
+class AnswerEvent(threading.Event):
+    """An Event whose answer survives a clear() that races it.
+
+    The server sometimes sends a request and then clears the event before
+    waiting (plan preview does). An answer given in between would be lost with
+    a plain Event; here clear() keeps a pending answer until a wait() takes it.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._pending = False
+        self._lock = threading.Lock()
+
+    def answer(self) -> None:
+        with self._lock:
+            self._pending = True
+            super().set()
+
+    def clear(self) -> None:
+        with self._lock:
+            if not self._pending:
+                super().clear()
+
+    def wait(self, timeout=None) -> bool:
+        ok = super().wait(timeout)
+        with self._lock:
+            self._pending = False
+        return ok
+
+
 class AutoState:
     """Duck-typed replacement for ws_server.ConnectionState."""
 
     def __init__(self):
-        self.confirm_event = threading.Event()
+        self.confirm_event = AnswerEvent()
         self.confirm_result: dict = {}
-        self.plan_event = threading.Event()
+        self.plan_event = AnswerEvent()
         self.plan_result: dict = {}
-        self.takeover_event = threading.Event()
-        self.ask_event = threading.Event()
+        self.takeover_event = AnswerEvent()
+        self.ask_event = AnswerEvent()
         self.ask_result: dict = {}
         self.stop_event = threading.Event()
         self.screen_update_event = threading.Event()
@@ -43,18 +73,17 @@ class AutoState:
     def send(self, msg: dict) -> None:
         self.messages.append(msg)
         kind = msg.get('type')
-        # The server clears some events *after* sending, so answer a beat later.
         if kind == 'confirm_request':
             self.confirm_result['approved'] = True
-            threading.Timer(0.05, self.confirm_event.set).start()
+            self.confirm_event.answer()
         elif kind == 'plan_preview':
             self.plan_result.update(approved=True, modified_steps=None)
-            threading.Timer(0.05, self.plan_event.set).start()
+            self.plan_event.answer()
         elif kind == 'ask_user':
             self.ask_result['answer'] = ''
-            threading.Timer(0.05, self.ask_event.set).start()
+            self.ask_event.answer()
         elif kind == 'handoff_request':
-            threading.Timer(0.05, self.takeover_event.set).start()
+            self.takeover_event.answer()
 
 
 def _instrument(stats: dict) -> None:
@@ -129,6 +158,18 @@ def _instrument(stats: dict) -> None:
 
     StuckDetector.check = check
 
+    from core.tree_reader import TreeReader
+    orig_snapshot = TreeReader.snapshot
+
+    def snapshot(self):
+        out = orig_snapshot(self)
+        mode = out[2].get('perception_mode', '?')
+        with lock:
+            stats['perception_modes'][mode] = stats['perception_modes'].get(mode, 0) + 1
+        return out
+
+    TreeReader.snapshot = snapshot
+
 
 def _egress_canary() -> dict:
     # Same check as sim/egress.py, inlined because this file runs inside old trees too.
@@ -153,7 +194,7 @@ def main(argv=None) -> int:
     sys.path.insert(0, os.getcwd())
     stats = {'llm_calls': 0, 'llm_errors': 0, 'llm_error_samples': [], 'llm_seconds': 0.0,
              'prompt_tokens': 0, 'cached_tokens': 0, 'output_tokens': 0, 'thought_tokens': 0,
-             'cache_creates': 0, 'stuck_warnings': 0, 'hard_stuck': 0}
+             'cache_creates': 0, 'stuck_warnings': 0, 'hard_stuck': 0, 'perception_modes': {}}
     result: dict = {'task': args.task}
     if os.environ.get('SPECTRA_EGRESS_CANARY') == '1':
         result['egress_canary'] = _egress_canary()

@@ -1,0 +1,33 @@
+{
+  "id": "settings_dark_mode",
+  "task": "Turn on Dark Mode",
+  "aliases": [
+    "Switch the phone to dark mode",
+    "Enable dark mode"
+  ],
+  "success": {
+    "type": "appearance",
+    "value": "dark"
+  },
+  "route": {
+    "category": "settings",
+    "apps": [
+      "Settings"
+    ],
+    "multi_app": false,
+    "comparison": false,
+    "refined_task": "Turn on Dark Mode"
+  },
+  "summary": "Turned on Dark Mode in Settings",
+  "policy": [
+    {
+      "screen": "*",
+      "do": {
+        "name": "done",
+        "input": {
+          "summary": "Dark Mode is on (it is not)"
+        }
+      }
+    }
+  ]
+}
