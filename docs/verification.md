@@ -28,3 +28,19 @@ Not verified:
 - The iOS app. There is no Xcode here, so the Swift code was neither built nor run.
 - A real simulator with WebDriverAgent: WDA auto-restart, timeouts and the observer pause were
   tested only with mocks.
+
+## 2026-04-01: commit ids after the history rewrite
+
+The history was rewritten again before publishing, so commit ids made before that no longer
+resolve. `head_commit` 7894f86… recorded in `bench/results/tree-tokens/manifest.json` and
+`bench/results/replay-heal/manifest.json` is one of them; the code it measured is unchanged in
+the rewritten history. `baseline_commit` a173a5c (the `v0.1-yhack` tag) still resolves. The
+result files are identified by these sha256 hashes:
+
+    47359e88b486b639aed4b9972ee7467939b74dd8afa31af8a9c47605eff67dbe  replay-heal/summary.json
+    0ed1286f50e86967fb22f71ada744d470fcbcdac16b717d0a9fb1cc691e4f124  tree-tokens/summary.json
+    3fa518abfe2160163711ba52a5354d366e64409d93e81f6c6701eabe47cd4c01  replay-heal/replays.jsonl
+    cc9879d6e5da484ee9a6dbfb09aa88f164d7f617453233c5efb2713bb41fbb33  tree-tokens/screens.jsonl
+
+Re-checked on this date: `make lint`, `make test` and `make e2e-offline` pass offline. Live
+Gemini is still not run, and the iOS app and a real WebDriverAgent are still unverified.

@@ -23,7 +23,7 @@ recorded flows carry over. The device is still reset before every task.
 
 An arm spec can add a patch: NAME=git:REF@bench/patches/x.patch. The default
 live run uses that for a third arm, v0.1-yhack+cachefix: the tag plus only the
-workflow-cache fix (a06eab9), so one bug fix and the rest of v0.2 show up
+workflow-cache fix (8efccbb), so one bug fix and the rest of v0.2 show up
 separately.
 
 Backends: live (Gemini, needs GEMINI_API_KEY), fake (sim/fake_gemini.py, a
