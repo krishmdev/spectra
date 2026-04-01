@@ -1,6 +1,8 @@
 PY ?= .venv/bin/python
 OFFLINE = scripts/offline-run
-LEASE ?= <local>
+# Optional: path to a compute-lease wrapper that serializes timing-sensitive runs.
+LEASE ?=
+RUN = $(if $(LEASE),$(PY) $(LEASE) run spectra-eval --)
 
 .PHONY: setup lint test demo demo-offline e2e-offline canary-check bench-live bench-live-check bench-learning bench-tree bench-replay
 
@@ -31,14 +33,14 @@ ARMS = --arm v0.1-yhack=git:v0.1-yhack \
        --arm head=.
 
 bench-live:       ## live Gemini eval, v0.1-yhack vs +cachefix vs HEAD (needs GEMINI_API_KEY; never in CI)
-	$(PY) $(LEASE) run spectra-eval -- $(PY) -m bench.run_suite $(ARMS) --seeds 0,1,2 --backend live \
+	$(RUN) $(PY) -m bench.run_suite $(ARMS) --seeds 0,1,2 --backend live \
 	  --out bench/results/live-paired
 
 bench-live-check: ## the same command against sim/fake_gemini.py: a harness check, not a result
 	$(PY) -m bench.run_suite $(ARMS) --seeds 0,1,2 --backend fake --out bench/runs/live-harness-check
 
 bench-learning:   ## live learning-sequence experiment (memory persists across tasks)
-	$(PY) $(LEASE) run spectra-eval -- $(PY) -m bench.run_suite \
+	$(RUN) $(PY) -m bench.run_suite \
 	  $(ARMS) --seeds 0,1 --backend live --experiment learning \
 	  --out bench/results/live-learning
 

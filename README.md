@@ -36,7 +36,7 @@ flowchart LR
 
 ```bash
 make setup          # uv sync --frozen (needs network once)
-make demo           # four tasks on the mock device with the scripted planner
+make demo           # four tasks, two seeds each (8 runs), on the mock device with the scripted planner
 make test           # unit + integration tests, sockets limited to localhost
 make demo-offline   # the demo with the whole process tree sandboxed (macOS)
 ```
@@ -198,7 +198,7 @@ wrong state.
 | v0.2 scored + planner fallback | 6/8 | 6/8 | 6/8 | 0 |
 
 - In both v0.1 silent failures, the position tier sent the text to the wrong conversation.
-- The two misses in every column are the stock-price flows. They are refused on purpose because
+- Both stock-price flows miss in every column; they are refused on purpose because
   they typed a value read at record time. Without that rule they "pass" with a stale price.
 - The step the fallback recovered in each changed condition was a notification
   alert the recording never saw.
@@ -212,7 +212,7 @@ rejected by the API, so there are no live numbers yet. When the run exists, its
 `bench/results/live-paired/summary.md` goes here.
 
 Both arms will run on this machine's Python 3.11 with google-genai 2.25.0 and facebook-wda 1.5.4.
-The hackathon build used google-genai 1.47.0 on Python 3.9. The v0.1 tree runs unmodified except
+The hackathon build used google-genai 1.47.0 on Python 3.9, per the virtualenv committed in the team repo at the time. The v0.1 tree runs unmodified except
 for one shim on `PATH` (`sim/bin/xcrun`), because its executor launches apps with `xcrun simctl`
 rather than over WDA.
 

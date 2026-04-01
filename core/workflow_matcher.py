@@ -77,7 +77,9 @@ def find_matching_workflow(task: str, planner, flows_dir: str = 'flows', exclude
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group())
-            return data.get('match')
+            match = data.get('match')
+            # The reply is used as a path; only accept one of the IDs we offered.
+            return match if match in workflows else None
     except Exception as e:
         print(f"[WorkflowMatcher] Error checking flows: {e}")
         

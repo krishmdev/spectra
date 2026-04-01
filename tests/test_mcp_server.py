@@ -86,3 +86,46 @@ def test_stdio_transport_survives_agent_prints(mock_device):
                 return screen.content[0].text
 
     assert 'SpringBoard' in anyio.run(go)
+
+
+def test_gated_tap_fails_closed_when_client_cannot_elicit(mock_device):
+    """No elicitation support: the sensitive tap must not happen."""
+    mock_device.device.launch('com.apple.MobileSMS')
+    mock_device.device.stack['com.apple.MobileSMS'].append('Mom')
+    mock_device.device.drafts['messages.Mom'] = 'hi'
+
+    async def go():
+        server = build_server(mock_device.url, planner_factory=ScriptedPlanner)
+        async with create_connected_server_and_client_session(server) as client:
+            screen = _text(await client.call_tool('read_screen', {}))
+            ref = next(line.split(']')[0].strip('[ ') for line in screen.splitlines() if '"Send"' in line)
+            return _text(await client.call_tool('tap', {'ref': int(ref)}))
+
+    out = anyio.run(go)
+    assert 'did not confirm' in out
+    assert all(m['from'] == 'them' for m in mock_device.device.state()['threads']['Mom'])
+
+
+def test_replay_flow_refuses_paths_outside_flow_dirs(mock_device, tmp_path):
+    outside = tmp_path / 'elsewhere.spectra'
+    outside.write_text('{"type": "header", "task": "x"}\n')
+
+    async def body(client):
+        return _text(await client.call_tool('replay_flow', {'path': str(outside)}))
+    out, _ = _run(mock_device, body)
+    assert 'only plays' in out
+
+
+def test_declined_handoff_stops_the_task(mock_device):
+    from server.mcp_server import HandoffDeclined, _ElicitCallbacks
+
+    class NoCtx:
+        async def elicit(self, message, schema):
+            raise RuntimeError('client has no elicitation')
+
+    cb = _ElicitCallbacks(NoCtx())
+
+    async def go():
+        return await anyio.to_thread.run_sync(lambda: cb.handoff('enter your password'))
+    with pytest.raises(HandoffDeclined):
+        anyio.run(go)

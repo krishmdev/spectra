@@ -159,7 +159,7 @@ def main(argv=None) -> int:
                 f.write(r['_text'] + '\n')
     meta = {
         'baseline_ref': args.baseline_ref,
-        'baseline_commit': subprocess.run(['git', 'rev-parse', args.baseline_ref], cwd=REPO, capture_output=True,
+        'baseline_commit': subprocess.run(['git', 'rev-parse', f'{args.baseline_ref}^{{commit}}'], cwd=REPO, capture_output=True,
                                           text=True).stdout.strip(),
         'head_commit': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=REPO, capture_output=True,
                                       text=True).stdout.strip(),

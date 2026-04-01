@@ -298,8 +298,8 @@ def write_markdown(path: str, summary: dict, meta: dict) -> None:
 
 
 def run_manifest(path: str, extra: dict) -> None:
-    tool = os.environ.get('SPECTRA_RUN_MANIFEST', '<local>')
-    if os.path.exists(tool):
+    tool = os.environ.get('SPECTRA_RUN_MANIFEST', '')
+    if tool and os.path.exists(tool):
         subprocess.run([sys.executable, tool, '--out', path] + [f'{k}={v}' for k, v in extra.items()], check=False)
         with open(path) as f:
             data = json.load(f)

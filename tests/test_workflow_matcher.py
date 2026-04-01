@@ -35,3 +35,12 @@ def test_only_finished_successful_recordings_count(tmp_path):
     flows = _load_available_workflows(str(tmp_path))
     assert list(flows.values()) == ['Turn on Dark Mode']
     assert find_matching_workflow('Turn on Dark Mode', EchoPlanner(), str(tmp_path)).endswith('good.spectra')
+
+
+def test_model_reply_must_be_one_of_the_offered_ids(tmp_path):
+    _record(tmp_path / 'good.spectra', 'Turn on Dark Mode', ['tap', 'done'])
+
+    class Liar:
+        def complete(self, prompt, max_output_tokens=200, purpose=''):
+            return '{"match": "/etc/passwd"}'
+    assert find_matching_workflow('Turn on Dark Mode', Liar(), str(tmp_path)) is None

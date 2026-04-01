@@ -32,6 +32,17 @@ class Approval(BaseModel):
     approve: bool
 
 
+class Answer(BaseModel):
+    answer: str
+
+
+class HandoffDeclined(RuntimeError):
+    """The user declined (or the client couldn't show) a handoff; the task stops."""
+
+
+FLOW_DIRS = ('flows', os.path.join('examples', 'flows'))
+
+
 class _Device:
     """The last snapshot, so tap/type_text can resolve refs the client saw."""
 
@@ -59,6 +70,15 @@ async def _confirm(ctx: Context, action: str, label: str, detail: str = '') -> b
     return result.action == 'accept' and bool(result.data and result.data.approve)
 
 
+async def _ask(ctx: Context, question: str, options: list[str]) -> str:
+    message = question + (f' Options: {", ".join(options)}' if options else '')
+    try:
+        result = await ctx.elicit(message=message, schema=Answer)
+    except Exception:
+        return ''
+    return result.data.answer if result.action == 'accept' and result.data else ''
+
+
 class _ElicitCallbacks:
     """SessionCallbacks for run_task, bridging the worker thread back to the MCP session."""
 
@@ -78,25 +98,32 @@ class _ElicitCallbacks:
         return ok, None
 
     def ask(self, question: str, options: list[str]) -> str:
-        return ''
+        return anyio.from_thread.run(_ask, self.ctx, question, options)
 
     def handoff(self, reason: str) -> None:
-        anyio.from_thread.run(_confirm, self.ctx, 'hand over to you:', reason,
-                              'Accept when you have finished on the device.')
+        done = anyio.from_thread.run(_confirm, self.ctx, 'hand over to you:', reason,
+                                     'Accept when you have finished on the device.')
+        if not done:
+            raise HandoffDeclined(reason)
 
 
 def build_server(wda_url: str | None = None, planner_factory=None, flows_dir: str = 'flows') -> FastMCP:
     wda_url = wda_url or os.environ.get('SPECTRA_WDA_URL', 'http://localhost:8100')
     device = _Device(wda_url)
+    lock = anyio.Lock()  # one device, one action at a time
     mcp = FastMCP('spectra', host='127.0.0.1', port=int(os.environ.get('SPECTRA_MCP_PORT', '8766')))
 
     @mcp.tool()
     def read_screen() -> str:
         """Current screen as Spectra's compact accessibility tree. Refs are valid until the next read."""
-        tree, meta = device.snapshot()
+        tree, meta = device.snapshot()  # sync tool: FastMCP runs it in a worker thread
         return f"app: {meta.get('app_name', '?')} ({meta.get('perception_mode')})\n{tree}"
 
     async def _act(ctx: Context, name: str, params: dict) -> str:
+        async with lock:
+            return await _act_locked(ctx, name, params)
+
+    async def _act_locked(ctx: Context, name: str, params: dict) -> str:
         if not device.ref_map:
             return 'Error: call read_screen first; refs come from the last snapshot'
         action = {'name': name, 'input': params}
@@ -125,10 +152,15 @@ def build_server(wda_url: str | None = None, planner_factory=None, flows_dir: st
         from core.session import run_session
         callbacks = _ElicitCallbacks(ctx)
         planner = (planner_factory or make_planner)()
-        result = await anyio.to_thread.run_sync(
-            lambda: run_session(task, callbacks, wda_url=wda_url, planner=planner, flows_dir=flows_dir,
-                                verbose=False))
-        device.ref_map = {}
+        async with lock:
+            try:
+                result = await anyio.to_thread.run_sync(
+                    lambda: run_session(task, callbacks, wda_url=wda_url, planner=planner, flows_dir=flows_dir,
+                                        verbose=False))
+            except HandoffDeclined as e:
+                return f'stopped: handoff not completed ({e})'
+            finally:
+                device.ref_map = {}
         how = 'replayed a saved flow' if result.replayed else f'{result.steps} steps'
         return f"{'done' if result.success else 'failed'}: {result.summary} ({how}, {result.duration}s)"
 
@@ -137,14 +169,20 @@ def build_server(wda_url: str | None = None, planner_factory=None, flows_dir: st
         """Replay a recorded .spectra flow without the model (sensitive steps still ask)."""
         from recorder.replayer import Replayer
 
+        real = os.path.realpath(path)
+        allowed = [os.path.realpath(d) + os.sep for d in (flows_dir, *FLOW_DIRS)]
+        if not real.endswith('.spectra') or not any(real.startswith(d) for d in allowed):
+            return 'Error: replay_flow only plays .spectra files under flows/ or examples/flows/'
+
         class _Gate(ConfirmationGate):
             def request_confirmation(self, action, ref_map):
                 label = ref_map.get(action['input'].get('ref'), {}).get('label', '')
                 return anyio.from_thread.run(_confirm, ctx, action['name'], label, '')
 
-        report = await anyio.to_thread.run_sync(
-            lambda: Replayer(path, wda_url=wda_url, step_delay=0.3, verbose=False, gate=_Gate()).run())
-        device.ref_map = {}
+        async with lock:
+            report = await anyio.to_thread.run_sync(
+                lambda: Replayer(real, wda_url=wda_url, step_delay=0.3, verbose=False, gate=_Gate()).run())
+            device.ref_map = {}
         return (f'{report.passed} passed, {report.fuzzy} fuzzy, {report.healed} healed, '
                 f'{report.failed} failed of {report.total}')
 
