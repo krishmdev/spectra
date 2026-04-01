@@ -1,460 +1,259 @@
 # Spectra
 
-Spectra is an accessibility-tree-first iOS agent. It controls apps on an iPhone simulator by reading the structured accessibility tree exposed through WebDriverAgent, planning the next action with Gemini, and executing taps, typing, scrolling, and navigation through WDA.
+Spectra is an iOS agent that reads the accessibility tree instead of screenshots. It gets each
+screen from WebDriverAgent as structured elements (`Cell "Wi-Fi"`, `Button "Send"`), compresses
+them into a few hundred characters, asks Gemini for the next action as a function call, and
+executes it through WDA. A SwiftUI app on the simulator is the front end: you type or speak a
+task, watch the steps, and approve anything sensitive.
 
-The current codebase is split across:
+It started as a YHack 2026 project built by a team of four (tag [`v0.1-yhack`](docs/releases/v0.1-yhack.md)).
+This repo is Krish's continuation: the hackathon history is kept intact, and the post-hackathon
+work sits on top of it, measured against a mock device (see
+[Since the hackathon](#since-the-hackathon)).
 
-- a Python backend that routes tasks, plans actions, runs the agent loop, and serves a WebSocket API
-- a SwiftUI iOS client that submits tasks, shows live progress, handles approvals, and presents results
-- a small voice pipeline that can capture speech on the Mac host and transcribe it locally
+Demo video from the hackathon: **[youtube.com/watch?v=_koDR96GIto](https://www.youtube.com/watch?v=_koDR96GIto)**
 
-Unlike screenshot-only computer-use systems, Spectra uses the accessibility tree as its primary perception layer. That gives the model semantic UI elements like `Cell "Wi-Fi"` or `Button "Send"` instead of forcing it to infer everything from pixels.
+```mermaid
+flowchart LR
+    app[SwiftUI app] <-- WebSocket --> ws[server/ws_server.py]
+    mcp[MCP client] <-- MCP --> ms[server/mcp_server.py]
+    ws --> session[core/session.py]
+    ms --> session
+    session --> cache{saved flow?}
+    cache -- yes --> replay[recorder/replayer.py]
+    cache -- no --> route[router + plan preview] --> loop
+    subgraph loop[agent loop]
+        read[tree_reader + tree_parser] --> plan[planner: Gemini or scripted]
+        plan --> gate[gates / handoff / stuck detector] --> act[executor]
+        act --> read
+    end
+    read <-- HTTP --> wda[(WebDriverAgent or sim/)]
+    act --> wda
+    replay --> wda
+```
 
-## 🎥 Demo
+## Quickstart (no key, no simulator)
 
-Watch a walkthrough of Spectra: **[Demo »](https://www.youtube.com/watch?v=_koDR96GIto)**
+```bash
+make setup          # uv sync --frozen (needs network once)
+make demo           # four tasks on the mock device with the scripted planner
+make test           # unit + integration tests, sockets limited to localhost
+make demo-offline   # the demo with the whole process tree sandboxed (macOS)
+```
 
-## Table of Contents
+`make demo` starts the mock device (`sim/`) as its own process. Each task then runs in a
+separate process through the real server pipeline: workflow cache, router, plan preview, agent
+loop, confirmation gate, recorder. Only the model is replaced, by `ScriptedPlanner`, which
+answers from fixtures in `sim/scenarios/`. The four tasks are:
 
-1. [What It Does](#what-it-does)
-2. [System Architecture](#system-architecture)
-3. [Repository Layout](#repository-layout)
-4. [How The Runtime Works](#how-the-runtime-works)
-5. [Environment Setup](#environment-setup)
-6. [Running Spectra](#running-spectra)
-7. [Testing](#testing)
-8. [Configuration](#configuration)
-9. [Known Constraints](#known-constraints)
+- turn on Dark Mode
+- add a reminder
+- text Mom (the gate stops before Send)
+- read a stock price and text it to someone (cross-app memory)
 
-## What It Does
+`make demo-offline` and `make e2e-offline` run under `scripts/offline-run`. That is
+`sandbox-exec` with outbound network denied except localhost, and keys unset. An egress canary
+runs inside the mock device and inside every agent process, and the demo fails if any of them can
+reach an external host. `make canary-check` is the companion test that shows the canary does
+connect when it isn't sandboxed. CI does the same on Linux inside a `--network none` container.
 
-Spectra currently supports:
+## Running it on a simulator
 
-- natural-language task execution against iOS simulator apps
-- app routing for supported domains such as Settings, Messages, rideshare, food delivery, and grocery
-- multi-app workflows with shared session memory
-- plan previews for more complex tasks
-- confirmation gates before sensitive actions such as send, pay, purchase, delete, or checkout
-- user handoff for sensitive input such as passwords or payment details
-- screenshot fallback when the accessibility tree is unavailable or too sparse
-- a SwiftUI control surface with live action history, memory pills, approval sheets, and result summaries
-- actionable local notifications that let the user approve or deny confirmations directly from the notification banner
-- host-side voice capture using the Mac microphone with local transcription via `faster-whisper`
+You need macOS with Xcode, a booted iOS simulator, WebDriverAgent, Python 3.11+ and a Gemini key.
 
-## System Architecture
+```bash
+cp .env.example .env                  # set GEMINI_API_KEY
+make setup
+xcrun simctl boot "iPhone 17 Pro" && open -a Simulator
+xcodebuild -project /path/to/WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner \
+  -destination "platform=iOS Simulator,name=iPhone 17 Pro" test     # WDA on :8100
+.venv/bin/python scripts/run_server.py                               # WebSocket on :8765
+```
 
-At a high level, Spectra is a three-part system:
+Then build and run `ios/Spectra/Spectra.xcodeproj` on the same simulator.
+`scripts/restart_all.sh` does all of it in one go; set `SIM_UDID` and `WDA_PROJ` first.
+
+Other ways in:
+- From Python without the app:
+  `.venv/bin/python -c "from core.agent import run_task; run_task('Open General settings')"`.
+  Approvals happen in the terminal.
+- From an MCP client: `.venv/bin/python -m server.mcp_server` (streamable HTTP on
+  `127.0.0.1:8766/mcp`) or `--transport stdio`.
+
+Environment variables:
+
+| variable | used for |
+|---|---|
+| `GEMINI_API_KEY` | the Gemini planner |
+| `SPECTRA_PLANNER` | `gemini` (default) or `scripted` |
+| `SPECTRA_WDA_URL` | WDA address for the MCP server and tree reader tests (default `http://localhost:8100`) |
+| `WDA_PROJ`, `SIM_UDID` / `SIM_DEVICE` | where the server finds WebDriverAgent when it restarts it |
+| `SPECTRA_DATA_DIR` | where `lessons.json` lives (default `data/`) |
+
+## How it works
+
+[docs/design.md](docs/design.md) has the details. In short:
+
+1. `core/tree_reader.py` pulls the tree from WDA. It falls back to a gridded screenshot when the
+   tree is missing or has fewer than three elements.
+2. `core/tree_parser.py` keeps interactive and structural elements and gives each a ref, e.g.
+   `[3] Button "Dark" → "0"`.
+3. `core/planner.py` sends that to Gemini with 18 tools, including tap, type_text, scroll,
+   open_app, remember, batch, handoff, ask_user, schedule and done.
+4. `core/gates.py` pauses before sensitive taps, unless the task asked for exactly that action.
+   `core/stuck_detector.py` catches loops without the model.
+5. `core/executor.py` performs the action through WDA.
+
+Around the loop, `core/session.py` runs a task end to end:
+- It checks `flows/` for a saved recording of the same task and replays it without the model.
+- Otherwise it routes the task to apps, previews a plan for multi-app work, and runs the loop
+  while recording a new flow.
+
+Lessons from failed runs go to `data/lessons.json` and come back in later prompts. The WebSocket
+server also runs the passive observer, context triggers and the scheduler.
+
+## Since the hackathon
+
+### Cleanup by Akshay (August 2026)
+
+Akshay flattened the repo from `spectra/` to the root and removed a submodule pointer with no
+`.gitmodules` behind it. He also purged the committed Xcode build cache, made
+`scripts/restart_all.sh` portable, and added the demo video. Those commits are kept as he made
+them.
+
+### Krish's v0.2
+
+The hackathon build couldn't run without a phone and a key, and nothing measured whether a change
+helped. Most of v0.2 is about fixing that; the rest is fixes and the features the PRD left for
+later.
+
+- Keyless runs: the planner is now injectable (`PlannerProtocol`, `GeminiPlanner`,
+  `ScriptedPlanner`). Before, `run_agent()` always built the Gemini planner. `sim/` is a mock WDA
+  device with seeded resets and a ground-truth `/_sim/state`.
+- An eval harness, `bench/run_suite.py`, runs the same scenarios and seeds against the
+  `v0.1-yhack` tree, that tree plus one bug fix, and HEAD. Every trial starts from fresh lessons,
+  flows, HOME and device state, and all of them are hashed into the manifest. Success is read from
+  the device, not from the agent's own `done`.
+- Bugs the harness found:
+  - The server opened the new recording before checking the workflow cache. So every task was
+    offered itself as a saved match, and a "yes" replayed zero steps and reported success.
+  - Replays skipped the confirmation gate.
+  - Recordings lacked the router's app launch.
+  - Flows that typed a value read off the screen replayed the stale value.
+- Replay matching builds on Akshay's exact/fuzzy/position matcher from the hackathon. It
+  adds confidence scores, label normalisation, identifier matching and an ambiguity cut. Weak steps
+  go to the planner for that one step instead of being tapped on a guess.
+- Tree parser v2 keeps standalone text such as alert bodies and section headers, stops
+  repeating labels, and skips zero-size elements.
+- Hardening carried over from the hackathon tree:
+  - The stuck detector tracks element labels.
+  - The prompt has an iOS-controls section.
+  - The passive observer pauses during tasks.
+  - WDA restarts when `source()` slows down.
+  - A stale snapshot is no longer used after a handoff.
+
+  None of these has been measured: the mock device has no latency model, and none of the numbers
+  below support them.
+- An MCP server, and scheduler tests ported from Krish's hackathon time-triggers branch.
+  Main's scheduler, from the team's final commit, was kept.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md).
+
+### Results
+
+Everything here comes from files in `bench/results/`, each with a run manifest.
+
+**Tree serialization** (`make bench-tree`,
+[bench/results/tree-tokens](bench/results/tree-tokens/summary.json)). These are 52 mock-device
+screens across four seeds. The XML is synthetic: shaped like WDA output, generated by `sim/`, not
+captured from a simulator. So read the ratios as properties of this XML, not of real apps. Token
+counts are chars/4 estimates; no Gemini count was available for this run.
+
+| | mean chars | est. tokens | vs raw | interactive elements kept | standalone text kept |
+|---|---|---|---|---|---|
+| raw WDA XML | 10,053 | 2,513 | 1.0x | 100% | 95.3%* |
+| v0.1 compact tree | 312 | 78 | 32.2x | 100% | 67.4% |
+| v0.2 compact tree | 315 | 79 | 32.0x | 100% | 100% |
+
+\*XML escaping (`&amp;`) hides a few strings from the text search. The text-retention metric
+counts exactly the text v0.2 was changed to keep, so the 100% says v0.2 does what it was changed
+to do, not that it is better in general. What it cost is about 1% more characters.
+
+**Replay after the UI changes** (`make bench-replay`,
+[bench/results/replay-heal](bench/results/replay-heal/summary.json)). Each scenario is recorded on
+two seeds, then replayed without the model under three conditions:
+
+- the same seed;
+- a reshuffled seed, where list order changes and an update banner shifts Settings rows;
+- a relabel variant, where Display & Brightness, Send and the message field are renamed.
+
+All three configurations use the v0.2 replayer and differ only in the matcher and the fallback. A
+silent failure is a replay whose report said every step passed while the device ended in the
+wrong state.
+
+| matcher | same seed | reshuffled | relabeled | silent failures (relabeled) |
+|---|---|---|---|---|
+| v0.1 three-tier | 6/8 | 5/8 | 3/8 | 2 |
+| v0.2 scored | 6/8 | 5/8 | 5/8 | 0 |
+| v0.2 scored + planner fallback | 6/8 | 6/8 | 6/8 | 0 |
+
+- In both v0.1 silent failures, the position tier sent the text to the wrong conversation.
+- The two misses in every column are the stock-price flows. They are refused on purpose because
+  they typed a value read at record time. Without that rule they "pass" with a stale price.
+- The step the fallback recovered in each changed condition was a notification
+  alert the recording never saw.
+- `ScriptedPlanner` stood in for Gemini, so this shows the mechanism
+  working, not how well Gemini does that step.
+
+**Live agent eval, v0.1-yhack vs v0.1-yhack+cachefix vs HEAD:** _live eval pending._ The harness
+and `make bench-live` are wired up and tested against a local fake Gemini endpoint
+(`make bench-live-check`, a harness check only). The Gemini key available on this machine was
+rejected by the API, so there are no live numbers yet. When the run exists, its
+`bench/results/live-paired/summary.md` goes here.
+
+Both arms will run on this machine's Python 3.11 with google-genai 2.25.0 and facebook-wda 1.5.4.
+The hackathon build used google-genai 1.47.0 on Python 3.9. The v0.1 tree runs unmodified except
+for one shim on `PATH` (`sim/bin/xcrun`), because its executor launches apps with `xcrun simctl`
+rather than over WDA.
+
+## Limitations
+
+- The iOS app was not built or run for this version; there's no Xcode on the machine it was
+  developed on. The Swift sources are unchanged from the hackathon.
+- The mock device only has four apps and no latency model. It checks that the logic works, not
+  how the agent does on real apps.
+- No live Gemini numbers yet (see above).
+- Safari and the macOS Safari-extension agent aren't covered by the mock or the tests.
+- The passive observer, context triggers and sequence suggestions still call Gemini directly
+  rather than through the planner interface, so they don't run keyless.
+- The license covers the whole repository, including teammates' hackathon code; see Credits.
+
+## Repository layout
 
 ```text
-SwiftUI iOS app  <---- WebSocket ---->  FastAPI server  ---->  Agent runtime
-     |                                        |                    |
-     |                                        |                    |
- task input, UI,                              |                    |
- notifications, approvals                     |                    |
-                                              v                    v
-                                      task routing, plan      tree read -> plan -> act
-                                      preview, memory,        against WebDriverAgent
-                                      confirmation bridge
+core/        agent loop, planner (Gemini + scripted), parser, reader, executor, gates, memory, session
+server/      WebSocket server for the iOS app, MCP server
+recorder/    .spectra recorder, replayer, scored matcher
+context/     passive observer, episode store, context triggers (team, hackathon)
+sim/         mock WDA device, scenario fixtures + script engine, fake Gemini endpoint, egress canary
+bench/       eval harness, tree and replay benchmarks, committed results
+ios/         SwiftUI client
+macos/       Safari extension agent (team, hackathon)
+examples/    five recordings from the hackathon demo
 ```
 
-### Main runtime path
+## Credits
 
-1. The iOS app sends a `command` message over WebSocket.
-2. The Python server creates a task thread in [`server/ws_server.py`](server/ws_server.py).
-3. The server routes the task with [`core/router.py`](core/router.py).
-4. If the task is multi-app or comparative, it generates a preview plan with [`core/plan_preview.py`](core/plan_preview.py) and waits for user approval from the iOS client.
-5. For each target app, the server launches the app on the simulator and calls [`core/agent.py`](core/agent.py).
-6. The agent loop:
-   - reads the current screen through [`core/tree_reader.py`](core/tree_reader.py)
-   - compresses the raw XML into a compact tree using [`core/tree_parser.py`](core/tree_parser.py)
-   - asks Gemini for the next structured tool call via [`core/planner.py`](core/planner.py)
-   - checks confirmation and takeover gates
-   - executes the action through [`core/executor.py`](core/executor.py)
-7. Progress, approvals, memory updates, handoff requests, questions, and final results are streamed back to the iOS app over WebSocket.
-8. The iOS app can surface confirmation requests either as in-app sheets or actionable notifications, and those notification actions send approval decisions back over the same socket.
+Built at YHack 2026 by Krish Maheshwari ([@krishmdev](https://github.com/krishmdev)), Akshay
+Irudayaraj ([@akshayirudayaraj](https://github.com/akshayirudayaraj)),
+[@vsangireddy27](https://github.com/vsangireddy27) and a fourth teammate.
 
-### Why the accessibility tree matters
+- Krish wrote the first version of the agent core, the WebSocket server and the iOS app.
+- The team added the workflow cache and record/replay (including the original matcher), context
+  triggers, the Safari agent, notifications and the scheduler.
+- Akshay's cleanup is described above; the v0.2 work is Krish's.
+- The team's own repo is [akshayirudayaraj/spectra](https://github.com/akshayirudayaraj/spectra).
 
-The agent does not plan from screen coordinates alone. It primarily sees a compact semantic tree such as:
+## License
 
-```text
-[1] NavBar "Settings"
-[2] Cell "Wi-Fi" -> "Connected"
-[3] Cell "Bluetooth" -> "On"
-[4] Cell "General"
-```
-
-The planner chooses a logical target by reference number, and the executor converts that ref back into the stored coordinates from the parsed tree. When WDA cannot provide a useful tree, Spectra falls back to screenshot mode and uses coordinate-based actions instead.
-
-### Core backend components
-
-- [`core/tree_parser.py`](core/tree_parser.py): filters raw WDA XML down to meaningful interactive and structural elements, assigns refs, and builds the `ref_map`
-- [`core/tree_reader.py`](core/tree_reader.py): reads the screen through WDA, extracts metadata, and switches to screenshot fallback when needed
-- [`core/planner.py`](core/planner.py): defines the Gemini system prompt and tool schemas, then requests the next action
-- [`core/executor.py`](core/executor.py): turns planner actions into WDA commands such as tap, type, scroll, go back, and go home
-- [`core/agent.py`](core/agent.py): orchestrates observe -> think -> act, memory injection, stuck detection, batching, handoff, and step callbacks
-- [`core/router.py`](core/router.py): classifies a task and selects app targets from [`config/apps.json`](config/apps.json)
-- [`core/plan_preview.py`](core/plan_preview.py): generates high-level step plans for more complex tasks
-- [`core/memory.py`](core/memory.py): provides session-scoped agent memory and persistent episodic lessons
-- [`core/gates.py`](core/gates.py): intercepts potentially sensitive actions before execution, with task-aware logic to avoid redundant prompts when the user explicitly asked for that action
-- [`core/takeover.py`](core/takeover.py): pauses the agent so the user can complete sensitive interaction manually
-- [`core/stuck_detector.py`](core/stuck_detector.py): detects repeated screens or repeated actions
-- [`server/ws_server.py`](server/ws_server.py): bridges the Python runtime and the SwiftUI client using FastAPI WebSockets
-
-### iOS client architecture
-
-The iOS app in [`ios/Spectra/Spectra`](ios/Spectra/Spectra) is the current user-facing control surface.
-
-- [`SpectraApp.swift`](ios/Spectra/Spectra/SpectraApp.swift): app entry point, notification setup, WebSocket bootstrap, and actionable notification handling for approve/deny
-- [`Services/WebSocketService.swift`](ios/Spectra/Spectra/Services/WebSocketService.swift): persistent WebSocket client with connection verification, stale-callback protection, ping-based liveness checks, auto-reconnect, state publishing, and protocol handling
-- [`Views/HomeView.swift`](ios/Spectra/Spectra/Views/HomeView.swift): task input, task history cards, voice trigger, navigation into task execution
-- [`Views/TaskRunningView.swift`](ios/Spectra/Spectra/Views/TaskRunningView.swift): live plan, memory pills, action log, stop button, approval and question sheets
-- [`Views/ConfirmationSheet.swift`](ios/Spectra/Spectra/Views/ConfirmationSheet.swift): sensitive action confirmations and takeover completion UI
-- [`Views/AskUserSheet.swift`](ios/Spectra/Spectra/Views/AskUserSheet.swift): user clarification prompts from the planner
-- [`Views/ResultView.swift`](ios/Spectra/Spectra/Views/ResultView.swift): completion or failure summary
-- [`Services/NotificationService.swift`](ios/Spectra/Spectra/Services/NotificationService.swift): local progress, approval, and completion notifications, including actionable confirmation buttons
-- [`Services/SpeechService.swift`](ios/Spectra/Spectra/Services/SpeechService.swift): on-device speech recognition service. This exists in the client, although the current primary voice trigger in `HomeView` uses host-side voice capture through the server.
-
-## Repository Layout
-
-```text
-spectra/
-|-- core/                 # Agent loop, planner, parser, executor, safety, memory
-|-- server/               # FastAPI WebSocket server
-|-- voice/                # Host-side voice capture and transcription
-|-- config/               # App registry and gate labels
-|-- ios/Spectra/          # SwiftUI iOS client and Xcode project
-|-- scripts/              # Convenience launch scripts
-|-- tests/                # Unit and integration tests
-|-- docs/                 # Product and internal implementation docs
-|-- requirements.txt      # Python dependencies
-`-- .env.example          # Environment variable template
-```
-
-## How The Runtime Works
-
-### 1. Task routing
-
-The backend does not always run a task against the current foreground app. It first classifies the request and maps it to app targets using [`config/apps.json`](config/apps.json). The default registry currently includes:
-
-- Settings
-- Messages
-- Uber
-- Lyft
-- DoorDash
-- Uber Eats
-- Instacart
-
-For example, a rideshare comparison task can route to both Uber and Lyft and run the agent loop in each app.
-
-### 2. Perception
-
-[`TreeReader.snapshot()`](core/tree_reader.py) returns:
-
-- a compact accessibility tree string
-- a `ref_map` mapping ref numbers to element metadata and coordinates
-- metadata such as app name, keyboard visibility, alert presence, and perception mode
-
-If WDA fails or the parsed tree contains fewer than three interactive elements, the reader switches to screenshot mode and includes a base64-encoded PNG in the metadata.
-
-### 3. Planning
-
-[`Planner`](core/planner.py) uses Gemini function calling with explicit tool schemas. The current action surface includes:
-
-- `tap`
-- `tap_xy`
-- `type_text`
-- `scroll`
-- `go_back`
-- `go_home`
-- `wait`
-- `remember`
-- `handoff`
-- `plan`
-- `done`
-- `stuck`
-- `ask_user`
-- `batch`
-
-The planner sees:
-
-- the current task
-- the current screen tree
-- recent action history
-- alert and keyboard signals
-- injected session memory
-- optional approved plan steps
-- optional stuck warnings
-
-### 4. Safety and user interaction
-
-Before execution, the runtime can pause in several ways:
-
-- confirmation gate: used for labels such as send, delete, pay, purchase, checkout, and secure text field interactions
-- handoff: used when the task requires sensitive manual input
-- ask-user: used when the planner needs clarification
-- plan preview: used before multi-app or comparison flows
-
-The confirmation gate is task-aware: if the user explicitly asked for the same sensitive action, the runtime can skip an unnecessary extra prompt.
-
-In the WebSocket flow, those pauses are surfaced in the iOS app as modal sheets and notifications. Confirmation notifications now include approve and deny actions that route directly back into the socket session.
-
-### 5. Execution
-
-The executor performs concrete WDA operations:
-
-- tapping the center point of a referenced element
-- tapping raw coordinates in screenshot mode
-- focusing and typing into text fields
-- swiping to scroll
-- left-edge swipe for back navigation
-- simulator home button action
-- launching apps with `xcrun simctl launch`
-
-### 6. Memory
-
-Spectra has two memory layers:
-
-- `AgentMemory`: per-task key/value storage for live multi-app workflows
-- `EpisodicMemory`: persistent lesson storage across runs, used to inject prior failure lessons back into prompts
-
-### 7. UI feedback
-
-The iOS app presents the current product design:
-
-- a minimal home screen with recent task cards and command entry
-- a prominent microphone button for host-side voice capture
-- a task detail screen with plan progress, memory pills, and reversed action history
-- confirmation and question sheets
-- completion summaries with steps, duration, and saved memory count
-
-## Environment Setup
-
-### Prerequisites
-
-You need:
-
-- macOS
-- Xcode with iOS Simulator support
-- a bootable iOS simulator
-- Python 3.11 or newer
-- a Gemini API key
-- WebDriverAgent running against the simulator
-
-Optional, but currently useful:
-
-- microphone access on the Mac host for server-side voice capture
-- notification permission on the iOS app
-
-### 1. Clone the repository
-
-```bash
-git clone <your-fork-or-repo-url>
-cd spectra
-```
-
-### 2. Create a Python environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Set your Gemini API key in `.env`:
-
-```bash
-GEMINI_API_KEY=your-gemini-key-here
-```
-
-Then load it into the current shell:
-
-```bash
-export $(grep -v '^#' .env | xargs)
-```
-
-If you use the Python launcher in `scripts/run_server.py`, it will also load `.env` automatically before starting the server.
-
-### 4. Boot the simulator
-
-```bash
-xcrun simctl list devices
-xcrun simctl boot "iPhone 15"
-open -a Simulator
-```
-
-### 5. Start WebDriverAgent
-
-Spectra expects WDA on `http://localhost:8100`.
-
-```bash
-xcodebuild -project WebDriverAgent.xcodeproj \
-  -scheme WebDriverAgentRunner \
-  -destination "platform=iOS Simulator,name=iPhone 15" \
-  test
-```
-
-Verify that WDA is reachable:
-
-```bash
-curl http://localhost:8100/status
-```
-
-### 6. Open the iOS project
-
-Open the Xcode project at [`ios/Spectra/Spectra.xcodeproj`](ios/Spectra/Spectra.xcodeproj), select the same booted simulator, and build the `Spectra` app.
-
-## Running Spectra
-
-The current codebase is designed around the WebSocket server plus the SwiftUI client. The older README flow using `main.py` is obsolete; there is no `main.py` entrypoint in this repository.
-
-### Recommended development workflow
-
-Run these in separate terminals.
-
-#### Terminal 1: WebDriverAgent
-
-Keep WDA running on port `8100`.
-
-#### Terminal 2: Spectra backend
-
-```bash
-source .venv/bin/activate
-python scripts/run_server.py
-```
-
-This is the preferred launcher for the current codebase. It:
-
-- loads `.env` automatically
-- adds the project root to `PYTHONPATH`
-- starts Uvicorn on port `8765`
-- disables WebSocket ping timeouts at the server layer, which is useful for the long-lived simulator connection
-
-Equivalent manual launch options are still available:
-
-```bash
-# simple shell wrapper
-./scripts/start_server.sh
-
-# or direct uvicorn
-uvicorn server.ws_server:app --host 0.0.0.0 --port 8765
-```
-
-The iOS simulator client connects to:
-
-```text
-ws://localhost:8765/ws
-```
-
-#### Terminal 3: Xcode / iOS app
-
-Build and run the `Spectra` app from Xcode. Once launched, the app connects to the backend automatically.
-
-### Typical usage
-
-1. Start WDA.
-2. Start the backend server.
-3. Run the SwiftUI app on the simulator.
-4. Enter a task such as `Open General settings` or `Compare Uber and Lyft prices to the airport`.
-5. Approve plans or sensitive actions when prompted.
-6. Review the result summary in the app.
-
-### Backend-only smoke check
-
-If you want to exercise the runtime without the SwiftUI app, you can call the Python entrypoint directly:
-
-```bash
-source .venv/bin/activate
-export $(grep -v '^#' .env | xargs)
-PYTHONPATH=. python -c "from core.agent import run_task; run_task('Open General settings')"
-```
-
-This uses the terminal-based approval flow instead of the WebSocket/iOS UI.
-
-## Testing
-
-There are two main categories of tests in this repository.
-
-### Fast local tests
-
-Most unit tests do not require a simulator or Gemini, but they do expect the repo root on `PYTHONPATH`.
-
-```bash
-source .venv/bin/activate
-PYTHONPATH=. pytest tests/ -q
-```
-
-### Live integration tests
-
-The following require a booted simulator with WDA:
-
-- [`tests/test_tree_reader.py`](tests/test_tree_reader.py)
-- [`tests/test_agent.py`](tests/test_agent.py)
-
-The following also require `GEMINI_API_KEY`:
-
-- [`tests/test_planner.py`](tests/test_planner.py)
-- parts of [`tests/test_memory.py`](tests/test_memory.py)
-- parts of [`tests/test_plan_preview.py`](tests/test_plan_preview.py)
-- parts of [`tests/test_router.py`](tests/test_router.py)
-
-### Current test caveats
-
-As of March 28, 2026, local test execution in this workspace revealed a few issues that are useful to know:
-
-- `pytest` must be run with `PYTHONPATH=.` or imports such as `core.*` and `server.*` fail during collection
-- [`tests/test_memory.py`](tests/test_memory.py) currently has a failing persistence expectation because `EpisodicMemory.add_lesson()` rejects very short lesson strings
-- several WebSocket endpoint tests currently fail because the installed `httpx` / `starlette` test client combination is incompatible with `TestClient`
-
-Those issues do not change the runtime architecture, but they do affect contributor expectations when running the suite.
-
-### WebSocket-specific coverage
-
-[`tests/test_ws_server.py`](tests/test_ws_server.py) exercises the current socket protocol shape, including:
-
-- task start and duplicate-task rejection
-- voice-start handling
-- stop-message unblocking behavior
-- confirmation request / response flow
-- plan preview approval flow
-
-## Configuration
-
-### Environment variables
-
-Current environment variables used directly by the code:
-
-- `GEMINI_API_KEY`: required by [`core/planner.py`](core/planner.py)
-
-### App registry and gate labels
-
-[`config/apps.json`](config/apps.json) controls:
-
-- the app routing registry
-- bundle IDs used for simulator launches
-- sensitive labels that trigger user confirmation
-
-### Ports and endpoints
-
-- WDA: `http://localhost:8100`
-- Spectra WebSocket server: `ws://localhost:8765/ws`
-
-## Known Constraints
-
-- The main supported execution target is the iOS simulator, not a physical device.
-- Spectra depends on WebDriverAgent being healthy and connected.
-- Screenshot mode exists as fallback, but the architecture is optimized for accessibility-tree-first operation.
-- The planner is Gemini-based in the current codebase; some older docs still reference Claude and are no longer authoritative.
-- The iOS client currently uses server-side voice capture from the Mac microphone in its primary home-screen flow, even though an on-device `SpeechService` also exists in the app.
-- The lightweight `scripts/start_server.sh` entrypoint does not load `.env` or alter WebSocket ping settings; for the current simulator app flow, `python scripts/run_server.py` is the more complete launcher.
-
-## Additional Documentation
-
-- Product and architecture notes: [`docs/Spectra_PRD_Complete.md`](docs/Spectra_PRD_Complete.md)
-- Internal build guide: [`docs/AGENTS.md`](docs/AGENTS.md)
+MIT, see [LICENSE](LICENSE).
