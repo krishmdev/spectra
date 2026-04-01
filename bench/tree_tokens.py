@@ -168,6 +168,11 @@ def main(argv=None) -> int:
     }
     with open(os.path.join(args.out, 'summary.json'), 'w') as f:
         json.dump({'meta': meta, 'summary': summary}, f, indent=2)
+    from bench.run_suite import library_versions, run_manifest
+    manifest = run_manifest(os.path.join(args.out, 'manifest.json'), {'benchmark': 'tree_tokens'})
+    manifest['run'] = {**meta, 'libraries': library_versions()}
+    with open(os.path.join(args.out, 'manifest.json'), 'w') as f:
+        json.dump(manifest, f, indent=2)
     print(json.dumps(summary, indent=2))
     return 0
 
