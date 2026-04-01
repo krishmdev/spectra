@@ -64,9 +64,9 @@ keeps the hackathon's three tiers and adds a score in [0, 1]:
 
 | tier | when | score |
 |---|---|---|
-| exact | same type and label, or same accessibility identifier | 0.97–1.0 |
-| fuzzy | same type, similar label (normalised text, list cells matched by their first segment) | 0.55–0.95 |
-| position | same type within 50 px, label unrelated | 0.30–0.50 |
+| exact | same type and label, or same accessibility identifier | 0.97-1.0 |
+| fuzzy | same type, similar label (normalised text, list cells matched by their first segment) | 0.55-0.95 |
+| position | same type within 50 px, label unrelated | 0.30-0.50 |
 
 A match whose top two candidates are within 0.05 of each other is marked ambiguous and loses 0.15.
 
