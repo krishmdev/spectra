@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "head_commit": "5b6b9134e8ea473a27991a3734a3ad722fe52f68",
+    "fallback_planner": "ScriptedPlanner (fixtures), standing in for Gemini",
+    "recorded_seeds": [
+      0,
+      1
+    ],
+    "scenarios": [
+      "messages_text_mom",
+      "reminders_add",
+      "settings_dark_mode",
+      "stocks_to_messages"
+    ]
+  },
+  "summary": {
+    "v0.1 matcher": {
+      "same": {
+        "replays": 8,
+        "success": 6,
+        "silent_failures": 0,
+        "planner_steps": 0
+      },
+      "reshuffled": {
+        "replays": 8,
+        "success": 5,
+        "silent_failures": 0,
+        "planner_steps": 0
+      },
+      "relabeled": {
+        "replays": 8,
+        "success": 3,
+        "silent_failures": 2,
+        "planner_steps": 0
+      }
+    },
+    "v0.2 matcher": {
+      "same": {
+        "replays": 8,
+        "success": 6,
+        "silent_failures": 0,
+        "planner_steps": 0
+      },
+      "reshuffled": {
+        "replays": 8,
+        "success": 5,
+        "silent_failures": 0,
+        "planner_steps": 0
+      },
+      "relabeled": {
+        "replays": 8,
+        "success": 5,
+        "silent_failures": 0,
+        "planner_steps": 0
+      }
+    },
+    "v0.2 + fallback": {
+      "same": {
+        "replays": 8,
+        "success": 6,
+        "silent_failures": 0,
+        "planner_steps": 0
+      },
+      "reshuffled": {
+        "replays": 8,
+        "success": 6,
+        "silent_failures": 0,
+        "planner_steps": 1
+      },
+      "relabeled": {
+        "replays": 8,
+        "success": 6,
+        "silent_failures": 0,
+        "planner_steps": 1
+      }
+    }
+  }
+}

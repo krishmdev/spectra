@@ -1,0 +1,39 @@
+{
+  "recorded_at": "2026-03-31T12:18:20-0400",
+  "host": {
+    "chip": "Apple M1 Pro",
+    "ram_gb": 16.0,
+    "os": "Darwin 26.5.1",
+    "python": "3.11.13",
+    "power": "Now drawing from 'AC Power'"
+  },
+  "compute_lease": {
+    "held": true,
+    "holder": "localhost-ai-bench"
+  },
+  "extra": {
+    "benchmark": "replay_heal"
+  },
+  "run": {
+    "head_commit": "5b6b9134e8ea473a27991a3734a3ad722fe52f68",
+    "fallback_planner": "ScriptedPlanner (fixtures), standing in for Gemini",
+    "recorded_seeds": [
+      0,
+      1
+    ],
+    "scenarios": [
+      "messages_text_mom",
+      "reminders_add",
+      "settings_dark_mode",
+      "stocks_to_messages"
+    ],
+    "libraries": {
+      "python": "3.11.13",
+      "google-genai": "2.25.0",
+      "facebook-wda": "1.5.4",
+      "fastapi": "0.141.1",
+      "pydantic": "2.13.5",
+      "pillow": "12.3.0"
+    }
+  }
+}

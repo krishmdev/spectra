@@ -1,0 +1,15 @@
+[1] NavBar "Display & Brightness"
+  [2] Button "Settings"
+[3] Button "Light" → "1" [selected]
+[4] Button "Dark" → "0"
+[5] Cell "Automatic"
+  [6] Switch "Automatic" → "0"
+[7] Cell "Text Size"
+[8] Cell "Bold Text"
+  [9] Switch "Bold Text" → "0"
+[10] Cell
+  [11] Slider "Brightness" → "50%"
+[12] Cell "True Tone"
+  [13] Switch "True Tone" → "1"
+[14] Cell "Night Shift" → "Off"
+[15] Cell "Auto-Lock" → "30 seconds"

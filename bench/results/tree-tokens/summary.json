@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "baseline_ref": "v0.1-yhack",
+    "baseline_commit": "a57d805421809d911d2a4f9b820db61cfe3a45cf",
+    "head_commit": "5b6b9134e8ea473a27991a3734a3ad722fe52f68",
+    "fixtures": "bench/screens.py (synthetic WDA-style XML from the mock device), seeds 0-3",
+    "token_note": "est_tokens = chars/4, an estimate; gemini_tokens only when a key was available"
+  },
+  "summary": {
+    "raw_xml": {
+      "screens": 52,
+      "mean_chars": 10053.1,
+      "mean_est_tokens": 2513.4,
+      "mean_gemini_tokens": null,
+      "interactive_retention": 1.0,
+      "text_retention": 0.953,
+      "compression_vs_raw": 1.0
+    },
+    "v0.1": {
+      "screens": 52,
+      "mean_chars": 311.9,
+      "mean_est_tokens": 77.9,
+      "mean_gemini_tokens": null,
+      "interactive_retention": 1.0,
+      "text_retention": 0.674,
+      "compression_vs_raw": 32.2
+    },
+    "v0.2": {
+      "screens": 52,
+      "mean_chars": 314.6,
+      "mean_est_tokens": 78.7,
+      "mean_gemini_tokens": null,
+      "interactive_retention": 1.0,
+      "text_retention": 1.0,
+      "compression_vs_raw": 32.0
+    }
+  }
+}

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Settings" label="Settings" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+  <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+      <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+          <XCUIElementTypeNavigationBar type="XCUIElementTypeNavigationBar" name="Display &amp; Brightness" label="Display &amp; Brightness" enabled="true" visible="true" accessible="true" x="0" y="62" width="402" height="44" index="0">
+            <XCUIElementTypeButton type="XCUIElementTypeButton" name="BackButton" label="Settings" enabled="true" visible="true" accessible="true" x="8" y="62" width="100" height="44" index="0"/>
+            <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Display &amp; Brightness" label="Display &amp; Brightness" value="Display &amp; Brightness" enabled="true" visible="true" accessible="true" x="120" y="72" width="162" height="24" index="1"/>
+          </XCUIElementTypeNavigationBar>
+          <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="APPEARANCE" label="APPEARANCE" value="APPEARANCE" enabled="true" visible="true" accessible="true" x="32" y="166" width="200" height="18" index="1"/>
+          <XCUIElementTypeButton type="XCUIElementTypeButton" name="Light" label="Light" value="1" enabled="true" visible="true" accessible="true" selected="true" x="60" y="196" width="100" height="170" index="2"/>
+          <XCUIElementTypeButton type="XCUIElementTypeButton" name="Dark" label="Dark" value="0" enabled="true" visible="true" accessible="true" x="242" y="196" width="100" height="170" index="3"/>
+          <XCUIElementTypeTable type="XCUIElementTypeTable" enabled="true" visible="true" accessible="false" x="0" y="380" width="402" height="460" index="4">
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="Automatic" label="Automatic" enabled="true" visible="true" accessible="true" x="16" y="384" width="370" height="52" index="0">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="Automatic" label="Automatic" enabled="true" visible="true" accessible="true" x="32" y="396" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Automatic" label="Automatic" value="Automatic" enabled="true" visible="true" accessible="true" x="72" y="399" width="220" height="22" index="1"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="402" width="10" height="16" index="2"/>
+              <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" name="Automatic" label="Automatic" value="0" enabled="true" visible="true" accessible="true" x="320" y="394" width="51" height="31" index="3"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="TEXT" label="TEXT" value="TEXT" enabled="true" visible="true" accessible="true" x="32" y="450" width="200" height="18" index="1"/>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="Text Size" label="Text Size" enabled="true" visible="true" accessible="true" x="16" y="472" width="370" height="52" index="2">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="Text Size" label="Text Size" enabled="true" visible="true" accessible="true" x="32" y="484" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Text Size" label="Text Size" value="Text Size" enabled="true" visible="true" accessible="true" x="72" y="487" width="220" height="22" index="1"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="490" width="10" height="16" index="2"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="Bold Text" label="Bold Text" enabled="true" visible="true" accessible="true" x="16" y="524" width="370" height="52" index="3">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="Bold Text" label="Bold Text" enabled="true" visible="true" accessible="true" x="32" y="536" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Bold Text" label="Bold Text" value="Bold Text" enabled="true" visible="true" accessible="true" x="72" y="539" width="220" height="22" index="1"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="542" width="10" height="16" index="2"/>
+              <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" name="Bold Text" label="Bold Text" value="0" enabled="true" visible="true" accessible="true" x="320" y="534" width="51" height="31" index="3"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="BRIGHTNESS" label="BRIGHTNESS" value="BRIGHTNESS" enabled="true" visible="true" accessible="true" x="32" y="590" width="200" height="18" index="4"/>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" enabled="true" visible="true" accessible="true" x="16" y="612" width="370" height="52" index="5">
+              <XCUIElementTypeSlider type="XCUIElementTypeSlider" name="Brightness" label="Brightness" value="50%" enabled="true" visible="true" accessible="true" x="60" y="624" width="280" height="28" index="0"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="True Tone" label="True Tone" enabled="true" visible="true" accessible="true" x="16" y="664" width="370" height="52" index="6">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="True Tone" label="True Tone" enabled="true" visible="true" accessible="true" x="32" y="676" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="True Tone" label="True Tone" value="True Tone" enabled="true" visible="true" accessible="true" x="72" y="679" width="220" height="22" index="1"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="682" width="10" height="16" index="2"/>
+              <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" name="True Tone" label="True Tone" value="1" enabled="true" visible="true" accessible="true" x="320" y="674" width="51" height="31" index="3"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="Night Shift" label="Night Shift" value="Off" enabled="true" visible="true" accessible="true" x="16" y="752" width="370" height="52" index="7">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="Night Shift" label="Night Shift" enabled="true" visible="true" accessible="true" x="32" y="764" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Night Shift" label="Night Shift" value="Night Shift" enabled="true" visible="true" accessible="true" x="72" y="767" width="220" height="22" index="1"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Off" label="Off" value="Off" enabled="true" visible="true" accessible="true" x="270" y="767" width="80" height="22" index="2"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="770" width="10" height="16" index="3"/>
+            </XCUIElementTypeCell>
+            <XCUIElementTypeCell type="XCUIElementTypeCell" name="Auto-Lock" label="Auto-Lock" value="30 seconds" enabled="true" visible="true" accessible="true" x="16" y="804" width="370" height="52" index="8">
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="Auto-Lock" label="Auto-Lock" enabled="true" visible="true" accessible="true" x="32" y="816" width="28" height="28" index="0"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Auto-Lock" label="Auto-Lock" value="Auto-Lock" enabled="true" visible="true" accessible="true" x="72" y="819" width="220" height="22" index="1"/>
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="30 seconds" label="30 seconds" value="30 seconds" enabled="true" visible="true" accessible="true" x="270" y="819" width="80" height="22" index="2"/>
+              <XCUIElementTypeImage type="XCUIElementTypeImage" name="chevron" label="chevron" enabled="true" visible="true" accessible="true" x="360" y="822" width="10" height="16" index="3"/>
+            </XCUIElementTypeCell>
+          </XCUIElementTypeTable>
+        </XCUIElementTypeOther>
+      </XCUIElementTypeOther>
+    </XCUIElementTypeOther>
+  </XCUIElementTypeWindow>
+  <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="1">
+    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="874" index="0">
+      <XCUIElementTypeStatusBar type="XCUIElementTypeStatusBar" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="54" index="0">
+        <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="402" height="54" index="0">
+          <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="150" height="54" index="0">
+            <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="30" y="14" width="70" height="26" index="0">
+              <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="9:41" label="9:41" value="9:41" enabled="true" visible="true" accessible="true" x="44" y="18" width="42" height="20" index="0"/>
+            </XCUIElementTypeOther>
+          </XCUIElementTypeOther>
+          <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="250" y="0" width="152" height="54" index="1">
+            <XCUIElementTypeOther type="XCUIElementTypeOther" name="3 of 3 bars, Cellular" label="3 of 3 bars, Cellular" enabled="true" visible="true" accessible="false" x="282" y="20" width="20" height="12" index="0"/>
+            <XCUIElementTypeOther type="XCUIElementTypeOther" name="Wi-Fi, 3 of 3 bars" label="Wi-Fi, 3 of 3 bars" enabled="true" visible="true" accessible="false" x="306" y="20" width="18" height="12" index="1"/>
+            <XCUIElementTypeOther type="XCUIElementTypeOther" name="100% battery power" label="100% battery power" enabled="true" visible="true" accessible="false" x="330" y="18" width="30" height="14" index="2"/>
+          </XCUIElementTypeOther>
+        </XCUIElementTypeOther>
+      </XCUIElementTypeStatusBar>
+    </XCUIElementTypeOther>
+  </XCUIElementTypeWindow>
+</XCUIElementTypeApplication>

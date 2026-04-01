@@ -1,0 +1,13 @@
+[1] NavBar "Reminders"
+  [2] Button "Lists"
+  [3] Button "Done"
+[4] Cell "Pick up dry cleaning"
+  [5] Button "Completed" → "0"
+  [6] TextField
+[7] Cell "Call the dentist"
+  [8] Button "Completed" → "0"
+  [9] TextField
+[10] Cell
+  [11] Button "Completed" → "0"
+  [12] TextField "Title" → "Buy milk"
+[13] Button "New Reminder"
