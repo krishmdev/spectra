@@ -1,6 +1,6 @@
 {
   "meta": {
-    "head_commit": "5b6b9134e8ea473a27991a3734a3ad722fe52f68",
+    "head_commit": "7894f8634cdf28d939f6428e84555e6d5d929906",
     "fallback_planner": "ScriptedPlanner (fixtures), standing in for Gemini",
     "recorded_seeds": [
       0,

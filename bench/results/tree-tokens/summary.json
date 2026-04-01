@@ -1,8 +1,8 @@
 {
   "meta": {
     "baseline_ref": "v0.1-yhack",
-    "baseline_commit": "a57d805421809d911d2a4f9b820db61cfe3a45cf",
-    "head_commit": "5b6b9134e8ea473a27991a3734a3ad722fe52f68",
+    "baseline_commit": "a173a5cd8dfeeccd95a7f5b731dc2f3aae6d39d7",
+    "head_commit": "7894f8634cdf28d939f6428e84555e6d5d929906",
     "fixtures": "bench/screens.py (synthetic WDA-style XML from the mock device), seeds 0-3",
     "token_note": "est_tokens = chars/4, an estimate; gemini_tokens only when a key was available"
   },
