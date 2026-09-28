@@ -20,8 +20,11 @@ def _run(tmp_path, *args):
     out = tmp_path / 'out'
     env = {k: v for k, v in os.environ.items() if k != 'GEMINI_API_KEY'}
     env['SPECTRA_RUN_MANIFEST'] = str(tmp_path / 'no-such-tool.py')
-    subprocess.run([sys.executable, '-m', 'bench.run_suite', '--out', str(out), *args], cwd=REPO, env=env,
-                   check=True, capture_output=True, timeout=600)
+    proc = subprocess.run([sys.executable, '-m', 'bench.run_suite', '--out', str(out), *args],
+                          cwd=REPO, env=env, capture_output=True, text=True, timeout=600)
+    assert proc.returncode == 0, (
+        f'bench.run_suite exited with {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}'
+    )
     rows = [json.loads(line) for line in open(out / 'trials.jsonl')]
     manifest = json.load(open(out / 'manifest.json'))
     return rows, manifest
