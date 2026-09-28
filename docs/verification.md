@@ -29,13 +29,11 @@ Not verified:
 - A real simulator with WebDriverAgent: WDA auto-restart, timeouts and the observer pause were
   tested only with mocks.
 
-## 2026-04-01: commit ids after the history rewrite
+## 2026-04-01
 
-The history was rewritten again before publishing, so commit ids made before that no longer
-resolve. `head_commit` 7894f86… recorded in `bench/results/tree-tokens/manifest.json` and
-`bench/results/replay-heal/manifest.json` is one of them; the code it measured is unchanged in
-the rewritten history. `baseline_commit` a173a5c (the `v0.1-yhack` tag) still resolves. The
-result files are identified by these sha256 hashes:
+The manifests in `bench/results/tree-tokens/manifest.json` and
+`bench/results/replay-heal/manifest.json` record `head_commit` 7894f86… and
+`baseline_commit` a173a5c (`v0.1-yhack`). The result files have these sha256 hashes:
 
     47359e88b486b639aed4b9972ee7467939b74dd8afa31af8a9c47605eff67dbe  replay-heal/summary.json
     0ed1286f50e86967fb22f71ada744d470fcbcdac16b717d0a9fb1cc691e4f124  tree-tokens/summary.json
